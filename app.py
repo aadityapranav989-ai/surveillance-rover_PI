@@ -3,6 +3,7 @@ import json
 import os
 import signal
 import socket
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -228,7 +229,7 @@ def main():
 
     server = ThreadingHTTPServer((config.HOST, config.PORT), RoverHandler)
     server.daemon_threads = True
-    role = "laptop vision" if config.VISION_ENABLED else "Pi gateway (vision off)"
+    role = "vision on" if config.VISION_ENABLED else "gateway, vision off"
     print(f"Rover dashboard [{role}] listening on http://{config.HOST}:{config.PORT}")
     print(f"Camera: {config.CAMERA_SOURCE}; forwarding commands to {config.ESP32_URL}")
 
@@ -244,6 +245,10 @@ def main():
     finally:
         if RoverHandler.follow is not None:
             RoverHandler.follow.disable("shutdown")
+        # Skip interpreter teardown: the camera thread is still inside OpenCV,
+        # and destroying it underneath that thread aborts the process (SIGABRT).
+        sys.stdout.flush()
+        os._exit(0)
 
 
 if __name__ == "__main__":
