@@ -57,7 +57,9 @@ FOLLOW_INTERVAL = _float("FOLLOW_INTERVAL", 0.3)
 FOLLOW_MIN_SPEED = _int("FOLLOW_MIN_SPEED", 90)
 FOLLOW_MAX_SPEED = _int("FOLLOW_MAX_SPEED", 150)
 FOLLOW_TURN_SPEED = _int("FOLLOW_TURN_SPEED", 110)
-FOLLOW_STEP_CM = _float("FOLLOW_STEP_CM", 15)
+# 20 cm is ~306 ms on the ESP32, just longer than FOLLOW_INTERVAL, so the
+# rover drives smoothly instead of stop-start.
+FOLLOW_STEP_CM = _float("FOLLOW_STEP_CM", 20)
 FOLLOW_MAX_TURN_DEG = _float("FOLLOW_MAX_TURN_DEG", 25)
 # Person must be within this fraction of the frame width from center before
 # the rover drives forward instead of turning.
