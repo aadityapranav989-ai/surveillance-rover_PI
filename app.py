@@ -1,10 +1,11 @@
 import json
+import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from config import CAMERA_STREAM_URL, ESP32_URL, HOST, PORT, REQUEST_TIMEOUT
+from config import CAMERA_DEVICE, CAMERA_FPS, CAMERA_HEIGHT, CAMERA_STREAM_URL, CAMERA_WIDTH, ESP32_URL, HOST, PORT, REQUEST_TIMEOUT
 
 DASHBOARD = """<!doctype html>
 <html><head><meta name=viewport content='width=device-width,initial-scale=1'>
@@ -46,7 +47,7 @@ joystick.addEventListener('pointerup',releaseJoystick);joystick.addEventListener
 setMode('joystick');
 async function refresh(){try{let d=await (await fetch('/api/status')).json();let g=d.gps;document.querySelector('#gps').innerHTML=g.fix?`GPS fix<br>Lat: ${g.latitude.toFixed(6)}<br>Lon: ${g.longitude.toFixed(6)}<br>Alt: ${g.altitude.toFixed(1)} m | Satellites: ${g.satellites}`:'Waiting for GPS fix';}catch(e){document.querySelector('#gps').textContent='ESP32 connection lost';}}
 setInterval(refresh,1000);refresh();
-</script></body></html>""".replace("ESP32_URL_PLACEHOLDER", ESP32_URL).replace("CAMERA_PANEL", "<img class=camera src='" + CAMERA_STREAM_URL + "' alt='Phone camera stream'>" if CAMERA_STREAM_URL else "<div class=status>Camera not configured. Set CAMERA_STREAM_URL on the Pi.</div>")
+</script></body></html>""".replace("ESP32_URL_PLACEHOLDER", ESP32_URL).replace("CAMERA_PANEL", "<img class=camera src='" + CAMERA_STREAM_URL + "' alt='Camera stream'>" if CAMERA_STREAM_URL else "<img class=camera src='/camera' alt='USB webcam stream'>")
 
 
 def esp32_request(path, method="GET"):
@@ -71,7 +72,37 @@ class RoverHandler(BaseHTTPRequestHandler):
         if self.path == "/api/status":
             self.proxy("/api/status", "GET")
             return
+        if self.path == "/camera":
+            self.stream_camera()
+            return
         self.send_payload(404, b'{"error":"not found"}')
+
+    def stream_camera(self):
+        command = [
+            "ffmpeg", "-loglevel", "error", "-f", "v4l2",
+            "-input_format", "yuyv422", "-video_size", f"{CAMERA_WIDTH}x{CAMERA_HEIGHT}",
+            "-framerate", CAMERA_FPS, "-i", CAMERA_DEVICE,
+            "-f", "mpjpeg", "-q:v", "6", "pipe:1",
+        ]
+        process = None
+        try:
+            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            self.send_response(200)
+            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=ffmpeg")
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            while True:
+                chunk = process.stdout.read(4096)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            pass
+        finally:
+            if process is not None:
+                process.terminate()
+                process.wait(timeout=2)
 
     def do_POST(self):
         parsed = urlparse(self.path)

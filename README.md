@@ -89,11 +89,33 @@ To configure a different ESP32 address:
 ESP32_URL=http://192.168.4.1 python3 app.py
 ```
 
-## Phone camera preview
+## USB webcam
 
-Install a phone camera app that provides an MJPEG stream, then set its stream
-URL in `/etc/default/rover-dashboard`. Common apps expose URLs similar to
-`http://PHONE_IP:8080/video` or `http://PHONE_IP:8080/stream`.
+The dashboard uses the connected USB webcam by default. The verified device
+is `/dev/video0`, using YUYV `640x480` at `5 fps`.
+
+```bash
+v4l2-ctl --list-devices
+v4l2-ctl --list-formats-ext -d /dev/video0
+ffmpeg -f v4l2 -input_format yuyv422 -video_size 640x480 -framerate 5 -i /dev/video0 -frames:v 1 webcam.jpg
+```
+
+The live camera is served at `/camera` by the Pi dashboard. Do not set
+`CAMERA_STREAM_URL` for the USB webcam.
+
+If the device changes, configure it in `/etc/default/rover-dashboard`:
+
+```ini
+CAMERA_DEVICE=/dev/video0
+CAMERA_WIDTH=640
+CAMERA_HEIGHT=480
+CAMERA_FPS=5
+```
+
+## Optional phone camera preview
+
+Set `CAMERA_STREAM_URL` only when using a phone or another network camera.
+Common apps expose URLs similar to `http://PHONE_IP:8080/video`.
 
 ```ini
 CAMERA_STREAM_URL=http://PHONE_IP:8080/video
@@ -131,6 +153,10 @@ Create the environment file:
 sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
 ESP32_URL=http://192.168.4.1
 CAMERA_STREAM_URL=
+CAMERA_DEVICE=/dev/video0
+CAMERA_WIDTH=640
+CAMERA_HEIGHT=480
+CAMERA_FPS=5
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF

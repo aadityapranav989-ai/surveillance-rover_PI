@@ -172,12 +172,16 @@ Create the systemd environment configuration:
 
   sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
 ESP32_URL=http://192.168.4.1
-  CAMERA_STREAM_URL=
+CAMERA_STREAM_URL=
+CAMERA_DEVICE=/dev/video0
+CAMERA_WIDTH=640
+CAMERA_HEIGHT=480
+CAMERA_FPS=5
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
 
-Configure the Pi Wi-Fi connection with fixed address 192.168.4.2:
+Configure the Pi Wi-Fi connection with fixed address 192.168.4.10:
 
   nmcli connection show --active
   sudo nmcli connection modify "WIFI_CONNECTION_NAME" ipv4.method manual ipv4.addresses 192.168.4.10/24 ipv4.gateway 192.168.4.1 ipv4.dns 192.168.4.1
@@ -189,8 +193,22 @@ Verify from the Pi:
 
   curl --max-time 5 http://192.168.4.1/api/status
 
-For the temporary phone-camera phase, set CAMERA_STREAM_URL to the MJPEG
-URL provided by the phone camera app. Examples used by camera apps include:
+USB webcam:
+
+  v4l2-ctl --list-devices
+  v4l2-ctl --list-formats-ext -d /dev/video0
+  ffmpeg -f v4l2 -input_format yuyv422 -video_size 640x480 -framerate 5 -i /dev/video0 -frames:v 1 webcam.jpg
+
+The dashboard serves the live USB webcam at /camera. Configure these values
+only if the webcam device or format changes:
+
+  CAMERA_DEVICE=/dev/video0
+  CAMERA_WIDTH=640
+  CAMERA_HEIGHT=480
+  CAMERA_FPS=5
+
+Optional phone camera: set CAMERA_STREAM_URL to the MJPEG
+URL provided by the phone camera app. Examples include:
 
   CAMERA_STREAM_URL=http://PHONE_IP:8080/video
   CAMERA_STREAM_URL=http://PHONE_IP:8080/stream
@@ -200,7 +218,7 @@ service after changing this value:
 
   sudo systemctl restart rover-dashboard
 
-The dashboard currently displays the phone stream only. Person detection and
+The dashboard currently displays the USB webcam. Person detection and
 autonomous movement will be added after the video stream is confirmed.
 
 Joystick navigation:
