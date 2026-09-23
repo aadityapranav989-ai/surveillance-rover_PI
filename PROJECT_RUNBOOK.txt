@@ -1,0 +1,398 @@
+SURVEILLANCE ROVER PROJECT RUNBOOK
+===================================
+
+Purpose
+-------
+This document contains the complete setup, deployment, operation, and
+troubleshooting procedure for the ESP32 + Raspberry Pi rover system.
+Update this file whenever the project workflow changes.
+
+System architecture
+-------------------
+Laptop browser
+    |
+    | HTTP :8080
+    v
+Raspberry Pi gateway
+    |
+    | HTTP :80
+    v
+ESP32 web server
+    |
+    +-- Motors
+    +-- GPS
+
+The ESP32 controls motors, timed movement, watchdog stopping, and GPS.
+The Raspberry Pi hosts the dashboard and forwards commands to the ESP32.
+
+Current working network
+-----------------------
+Wi-Fi network: KOLFER
+ESP32 IP:     192.168.192.131
+Raspberry Pi: 192.168.192.105
+Pi dashboard: http://192.168.192.105:8080/
+ESP32 direct: http://192.168.192.131/
+
+IP addresses can change. Always verify them before starting a session.
+Never commit Wi-Fi passwords or private credentials to Git.
+
+PART 1 - ESP32 HARDWARE AND WIRING
+===================================
+
+Motor pins from src/config.h
+----------------------------
+Left BTS7960:
+  LEFT_RPWM = 25
+  LEFT_LPWM = 26
+
+Right BTS7960:
+  RIGHT_RPWM = 27
+  RIGHT_LPWM = 14
+
+GPS GY-NEO6MV2 on ESP32 UART2:
+  GPS_RX_PIN = 16 (connect to GPS TX)
+  GPS_TX_PIN = 17 (connect to GPS RX)
+  Baud rate  = 9600
+
+Before powering the rover:
+1. Connect ESP32 GND, motor driver GND, and GPS GND together.
+2. Confirm motor driver power wiring and current rating.
+3. Keep wheels lifted during the first motor test.
+4. Confirm the GPS TX/RX connections are crossed correctly.
+5. Keep the physical emergency stop accessible.
+
+PART 2 - ESP32 WIFI CONFIGURATION
+==================================
+
+Open the ESP32 project:
+
+PowerShell on the development computer:
+
+  cd "D:\Desktop\Hackathon\ESP32 human detection\RadarTest"
+
+Edit src/config.h and set the Wi-Fi network shared by the ESP32, Pi,
+and laptop:
+
+  const char *const WIFI_SSID = "YOUR_WIFI_NAME";
+  const char *const WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+
+The current working network is KOLFER. Do not place the real password in
+this runbook or commit it to Git.
+
+The fallback access point is:
+
+  SSID:     ESP32-Robot
+  Password: robot123
+  ESP32 IP: 192.168.4.1
+
+The fallback AP is useful for direct testing, but the recommended setup is
+to connect all three devices to the same router Wi-Fi network.
+
+PART 3 - BUILD, UPLOAD, AND FIND ESP32 IP
+==========================================
+
+Build the ESP32 firmware:
+
+  cd "D:\Desktop\Hackathon\ESP32 human detection\RadarTest"
+  pio run
+
+Find the serial port on Windows:
+
+  pio device list
+
+Upload, replacing COMx with the actual port:
+
+  pio run --target upload --upload-port COMx
+
+Open the serial monitor:
+
+  pio device monitor -b 115200
+
+Press the ESP32 reset button. Look for one of these messages:
+
+  Wi-Fi connected. Dashboard: http://192.168.x.x
+
+or:
+
+  Dashboard: http://192.168.4.1
+
+Record the printed ESP32 address for the Pi configuration.
+
+Test the ESP32 from the Pi:
+
+  curl --max-time 5 http://ESP32_IP/api/status
+
+Example using the current address:
+
+  curl --max-time 5 http://192.168.192.131/api/status
+
+Expected response shape:
+
+  {"wifi":"192.168.192.131","ap":false,"motionActive":false,"gps":{"fix":false,"latitude":0.000000,"longitude":0.000000,"altitude":0.0,"satellites":0}}
+
+PART 4 - CREATE OR UPDATE THE RASPBERRY PI REPOSITORY
+======================================================
+
+Repository:
+
+  https://github.com/aadityapranav989-ai/surveillance-rover_PI.git
+
+SSH into the headless Pi:
+
+  ssh pi@raspberrypi.local
+
+If the hostname is unavailable, find the Pi address from the router or use
+the address shown by hostname -I, then connect with:
+
+  ssh pi@PI_IP
+
+Install prerequisites:
+
+  sudo apt update
+  sudo apt install -y git python3
+
+Clone the repository. Use this only on a new installation:
+
+  sudo mkdir -p /opt
+  sudo git clone https://github.com/aadityapranav989-ai/surveillance-rover_PI.git /opt/raspberry-pi-rover
+  sudo chown -R pi:pi /opt/raspberry-pi-rover
+
+For an existing installation, update instead:
+
+  cd /opt/raspberry-pi-rover
+  git pull --ff-only
+
+The Pi application uses only the Python standard library. No pip install
+or virtual environment is required.
+
+PART 5 - CONFIGURE THE PI GATEWAY
+==================================
+
+Create the systemd environment configuration:
+
+  sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
+ESP32_URL=http://192.168.192.131
+ROVER_HOST=0.0.0.0
+ROVER_PORT=8080
+EOF
+
+Replace 192.168.192.131 with the current ESP32 IP if it changed.
+
+Install or refresh the systemd service:
+
+  sudo cp /opt/raspberry-pi-rover/systemd/rover-dashboard.service /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now rover-dashboard
+
+After changing /etc/default/rover-dashboard:
+
+  sudo systemctl restart rover-dashboard
+
+Check service status:
+
+  sudo systemctl status rover-dashboard
+
+Expected state:
+
+  Active: active (running)
+
+Confirm the Pi is listening:
+
+  sudo ss -tulpn | grep 8080
+
+Expected shape:
+
+  tcp LISTEN 0 5 0.0.0.0:8080 0.0.0.0:* users:(...(python3...))
+
+PART 6 - FIND PI IP AND OPEN DASHBOARD
+======================================
+
+On the Pi:
+
+  hostname -I
+
+The current Pi address is 192.168.192.105. Use the first IPv4 address
+shown by hostname -I, not the IPv6 address.
+
+From the laptop browser, open:
+
+  http://PI_IP:8080/
+
+Current dashboard:
+
+  http://192.168.192.105:8080/
+
+The ESP32 direct dashboard is also available at:
+
+  http://192.168.192.131/
+
+The Pi dashboard is preferred because it gives the laptop one stable entry
+point and routes commands through the Raspberry Pi.
+
+PART 7 - TEST THE SYSTEM HEADLESS
+==================================
+
+Run these commands on the Pi.
+
+Test ESP32 connectivity:
+
+  ping -c 4 -W 2 192.168.192.131
+  curl --max-time 5 -v http://192.168.192.131/api/status
+
+Test the Pi gateway locally:
+
+  curl --max-time 5 http://127.0.0.1:8080/api/status
+
+Test the gateway from another computer:
+
+  curl --max-time 5 http://PI_IP:8080/api/status
+
+Send a forward command. Keep the first test short and keep the wheels lifted:
+
+  curl -X POST "http://PI_IP:8080/api/command?direction=FORWARD&speed=80&value=5"
+
+Send a left turn:
+
+  curl -X POST "http://PI_IP:8080/api/command?direction=LEFT&speed=80&value=10"
+
+Stop immediately:
+
+  curl -X POST http://PI_IP:8080/api/stop
+
+The value is distance in centimeters for FORWARD/BACKWARD and degrees for
+LEFT/RIGHT. Speed is from 1 to 255.
+
+PART 8 - LOGS AND SERVICE CONTROL
+=================================
+
+Follow live logs:
+
+  journalctl -u rover-dashboard -f
+
+Show recent logs:
+
+  sudo journalctl -u rover-dashboard -n 100 --no-pager
+
+Restart after code or configuration changes:
+
+  sudo systemctl restart rover-dashboard
+
+Stop the service:
+
+  sudo systemctl stop rover-dashboard
+
+Start the service:
+
+  sudo systemctl start rover-dashboard
+
+Disable automatic startup:
+
+  sudo systemctl disable rover-dashboard
+
+PART 9 - TROUBLESHOOTING
+=========================
+
+Symptom: curl to 192.168.4.1 hangs or times out
+
+Cause: the Pi is connected to the router network, while 192.168.4.1 is the
+ESP32 fallback AP network.
+
+Check the Pi network:
+
+  ip route
+  hostname -I
+
+If the Pi has an address such as 192.168.192.105, use the ESP32 router IP
+printed by the serial monitor, such as 192.168.192.131. Update:
+
+  sudo nano /etc/default/rover-dashboard
+  sudo systemctl restart rover-dashboard
+
+Symptom: ESP32 unavailable from the Pi
+
+  ping -c 4 -W 2 ESP32_IP
+  curl --max-time 5 -v http://ESP32_IP/api/status
+  sudo systemctl status rover-dashboard
+  journalctl -u rover-dashboard -n 50 --no-pager
+
+Confirm ESP32 and Pi are on the same subnet. For example, both should be
+192.168.192.x when using the router network.
+
+Symptom: dashboard opens but GPS says waiting for fix
+
+1. Move the GPS antenna outdoors or near an unobstructed window.
+2. Confirm GPS TX is connected to ESP32 GPIO16.
+3. Confirm GPS RX is connected to ESP32 GPIO17.
+4. Confirm the module uses 9600 baud.
+5. Watch the ESP32 serial monitor for GPS output.
+
+Symptom: SSH says REMOTE HOST IDENTIFICATION HAS CHANGED
+
+Only do this when you know the Pi was reinstalled or its host key changed:
+
+  ssh-keygen -R raspberrypi.local
+  ssh pi@raspberrypi.local
+
+Verify the new fingerprint before accepting it.
+
+Symptom: port 8080 is not reachable from the laptop
+
+On the Pi:
+
+  sudo ss -tulpn | grep 8080
+  hostname -I
+  sudo systemctl status rover-dashboard
+
+If UFW is enabled:
+
+  sudo ufw allow 8080/tcp
+
+PART 10 - UPDATE PROCEDURE
+===========================
+
+After changing the Pi repository:
+
+On the development computer:
+
+  cd "D:\Desktop\Hackathon\ESP32 human detection\RaspberryPiRover"
+  git add .
+  git commit -m "Describe the change"
+  git push
+
+On the Pi:
+
+  cd /opt/raspberry-pi-rover
+  git pull --ff-only
+  sudo systemctl restart rover-dashboard
+  sudo systemctl status rover-dashboard
+
+After changing ESP32 firmware:
+
+  pio run
+  pio run --target upload --upload-port COMx
+
+Then reset the ESP32, read its new Wi-Fi IP from the serial monitor, update
+/etc/default/rover-dashboard if needed, and restart the Pi service.
+
+Completion checklist
+--------------------
+[ ] ESP32 firmware builds without errors.
+[ ] ESP32 uploads successfully.
+[ ] ESP32 serial monitor prints a Wi-Fi dashboard IP.
+[ ] Pi can ping the ESP32.
+[ ] Pi curl to /api/status returns JSON.
+[ ] rover-dashboard is active (running).
+[ ] Pi listens on TCP port 8080.
+[ ] Laptop opens http://PI_IP:8080/.
+[ ] GPS fix is visible outdoors.
+[ ] Forward, turn, and stop commands are tested with wheels lifted first.
+[ ] Emergency stop procedure is known before driving.
+
+Last verified workflow
+----------------------
+Date: 2026-09-23
+ESP32 IP: 192.168.192.131
+Pi IP: 192.168.192.105
+Pi service: active (running)
+Pi port: 8080
+Dashboard: http://192.168.192.105:8080/
