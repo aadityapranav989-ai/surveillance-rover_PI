@@ -32,6 +32,7 @@ ESP32 IP:     192.168.192.131
 Raspberry Pi: 192.168.192.105
 Pi dashboard: http://192.168.192.105:8080/
 ESP32 direct: http://192.168.192.131/
+ESP32 stable name after firmware update: http://esp32-rover.local/
 
 IP addresses can change. Always verify them before starting a session.
 Never commit Wi-Fi passwords or private credentials to Git.
@@ -87,6 +88,9 @@ The fallback access point is:
 
 The fallback AP is useful for direct testing, but the recommended setup is
 to connect all three devices to the same router Wi-Fi network.
+
+The ESP32 firmware advertises the stable mDNS name esp32-rover.local. Use
+this name instead of the changing DHCP address when configuring the Pi.
 
 PART 3 - BUILD, UPLOAD, AND FIND ESP32 IP
 ==========================================
@@ -149,7 +153,7 @@ the address shown by hostname -I, then connect with:
 Install prerequisites:
 
   sudo apt update
-  sudo apt install -y git python3
+  sudo apt install -y git python3 avahi-daemon libnss-mdns
 
 Clone the repository. Use this only on a new installation:
 
@@ -171,13 +175,25 @@ PART 5 - CONFIGURE THE PI GATEWAY
 Create the systemd environment configuration:
 
   sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
-ESP32_URL=http://192.168.192.131
+  ESP32_URL=http://esp32-rover.local
   CAMERA_STREAM_URL=
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
 
 Replace 192.168.192.131 with the current ESP32 IP if it changed.
+
+Preferred configuration after flashing the hostname update:
+
+  ESP32_URL=http://esp32-rover.local
+
+Verify from the Pi:
+
+  getent hosts esp32-rover.local
+  curl --max-time 5 http://esp32-rover.local/api/status
+
+If mDNS does not resolve on the router, create a DHCP reservation for the
+ESP32 MAC address in the router and use its reserved IPv4 address instead.
 
 For the temporary phone-camera phase, set CAMERA_STREAM_URL to the MJPEG
 URL provided by the phone camera app. Examples used by camera apps include:

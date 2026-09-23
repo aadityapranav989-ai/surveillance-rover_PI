@@ -33,7 +33,7 @@ On the headless Pi:
 
 ```bash
 sudo apt update
-sudo apt install -y git python3
+sudo apt install -y git python3 avahi-daemon libnss-mdns
 sudo mkdir -p /opt
 sudo git clone <your-private-repository-url> /opt/raspberry-pi-rover
 sudo chown -R pi:pi /opt/raspberry-pi-rover
@@ -45,7 +45,7 @@ Do not put passwords or private Wi-Fi credentials in Git. The repository uses on
 
 ```bash
 cd /opt/raspberry-pi-rover
-ESP32_URL=http://192.168.4.1 python3 app.py
+ESP32_URL=http://esp32-rover.local python3 app.py
 ```
 
 From the laptop, open `http://<PI_IP>:8080/`.
@@ -82,12 +82,29 @@ Create the environment file:
 
 ```bash
 sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
-ESP32_URL=http://192.168.4.1
+ESP32_URL=http://esp32-rover.local
 CAMERA_STREAM_URL=
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
 ```
+
+For a stable ESP32 address, use the mDNS name `esp32-rover.local`:
+
+```ini
+ESP32_URL=http://esp32-rover.local
+```
+
+After flashing the updated ESP32 firmware, verify name resolution from the Pi:
+
+```bash
+getent hosts esp32-rover.local
+curl --max-time 5 http://esp32-rover.local/api/status
+```
+
+If the name does not resolve, reserve the ESP32's MAC address in the router's
+DHCP settings and use the reserved `192.168.192.x` address instead. The mDNS
+name is convenient, but a DHCP reservation is the most predictable option.
 
 Install and start the service:
 
