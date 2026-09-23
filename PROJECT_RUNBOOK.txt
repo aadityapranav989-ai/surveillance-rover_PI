@@ -9,11 +9,13 @@ Update this file whenever the project workflow changes.
 
 System architecture
 -------------------
-Laptop browser
-    |
-    | HTTP :8080
-    v
-Raspberry Pi gateway
+Laptop (vision app, http://127.0.0.1:8090/)
+    |   ^
+    |   | camera stream  GET /camera
+    |   |
+    | follow + manual commands  HTTP :8080
+    v   |
+Raspberry Pi gateway (USB webcam, manual dashboard)
     |
     | HTTP :80
     v
@@ -23,7 +25,12 @@ ESP32 web server
     +-- GPS
 
 The ESP32 controls motors, timed movement, watchdog stopping, and GPS.
-The Raspberry Pi hosts the dashboard and forwards commands to the ESP32.
+The Raspberry Pi streams the USB webcam, hosts the manual driving
+dashboard, and forwards commands to the ESP32. No video processing runs on
+the Pi.
+The laptop reads the Pi's camera stream, runs human body detection and face
+recognition, and in follow mode steers the rover towards a detected person
+by sending commands through the Pi.
 
 Current working network
 -----------------------
@@ -75,14 +82,17 @@ Edit src/config.h and set the Wi-Fi network shared by the ESP32, Pi,
 and laptop:
 
   const char *const WIFI_AP_SSID = "ESP32-Robot";
-  const char *const WIFI_AP_PASSWORD = "robot123";
+  const char *const WIFI_AP_PASSWORD = "<choose a strong password>";
+
+Keep the real password out of Git. Anyone who joins this network can drive
+the rover from the dashboard.
 
 The ESP32 creates this network; no external router or phone hotspot is needed.
 
 The access point is:
 
   SSID:     ESP32-Robot
-  Password: robot123
+  Password: (set in src/config.h, not recorded here)
   ESP32 IP: 192.168.4.1
 
 The ESP32 access point is the primary network. Connect the Pi, laptop, and
@@ -149,7 +159,7 @@ the address shown by hostname -I, then connect with:
 Install prerequisites:
 
   sudo apt update
-  sudo apt install -y git python3 avahi-daemon libnss-mdns
+  sudo apt install -y git python3 python3-venv v4l-utils avahi-daemon libnss-mdns
 
 Clone the repository. Use this only on a new installation:
 
@@ -162,8 +172,18 @@ For an existing installation, update instead:
   cd /opt/raspberry-pi-rover
   git pull --ff-only
 
-The Pi application uses only the Python standard library. No pip install
-or virtual environment is required.
+Create the Python environment. This needs internet access, so do it while
+the Pi is on a normal Wi-Fi network, before switching it to ESP32-Robot.
+Re-run the pip line after pulling changes to requirements.txt:
+
+  cd /opt/raspberry-pi-rover
+  python3 -m venv .venv
+  .venv/bin/pip install -r requirements.txt
+
+The Pi uses OpenCV only to read and encode webcam frames; it does not need
+the vision models. The systemd service runs
+/opt/raspberry-pi-rover/.venv/bin/python, so the .venv must exist before the
+service starts.
 
 PART 5 - CONFIGURE THE PI GATEWAY
 ==================================
@@ -172,14 +192,16 @@ Create the systemd environment configuration:
 
   sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
 ESP32_URL=http://192.168.4.1
-CAMERA_STREAM_URL=
 CAMERA_DEVICE=/dev/video0
 CAMERA_WIDTH=640
 CAMERA_HEIGHT=480
-CAMERA_FPS=5
+CAMERA_FPS=10
+JPEG_QUALITY=70
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
+
+All settings and defaults are listed in config.py.
 
 Configure the Pi Wi-Fi connection with fixed address 192.168.4.10:
 
@@ -197,29 +219,25 @@ USB webcam:
 
   v4l2-ctl --list-devices
   v4l2-ctl --list-formats-ext -d /dev/video0
-  ffmpeg -f v4l2 -input_format yuyv422 -video_size 640x480 -framerate 5 -i /dev/video0 -frames:v 1 webcam.jpg
 
-The dashboard serves the live USB webcam at /camera. Configure these values
-only if the webcam device or format changes:
+The Pi opens the webcam once and shares it with every viewer, including the
+laptop vision app. The raw stream is served at /camera. Configure these
+values only if the webcam device or format changes:
 
   CAMERA_DEVICE=/dev/video0
   CAMERA_WIDTH=640
   CAMERA_HEIGHT=480
-  CAMERA_FPS=5
+  CAMERA_FPS=10
+  JPEG_QUALITY=70
 
-Optional phone camera: set CAMERA_STREAM_URL to the MJPEG
-URL provided by the phone camera app. Examples include:
-
-  CAMERA_STREAM_URL=http://PHONE_IP:8080/video
-  CAMERA_STREAM_URL=http://PHONE_IP:8080/stream
-
-The phone, Pi, and ESP32 must be on the same Wi-Fi network. Restart the
-service after changing this value:
+The stream crosses the ESP32 Wi-Fi, which has limited bandwidth. If the video
+stutters on the laptop, lower CAMERA_FPS (for example 6) or JPEG_QUALITY (for
+example 55) and restart the service:
 
   sudo systemctl restart rover-dashboard
 
-The dashboard currently displays the USB webcam. Person detection and
-autonomous movement will be added after the video stream is confirmed.
+The Pi dashboard shows "Laptop follow mode: DRIVING / idle / blocked" so the
+person at the Pi dashboard can see when the laptop is steering.
 
 Joystick navigation:
 
@@ -228,7 +246,8 @@ Joystick navigation:
   Left     = left turn
   Right    = right turn
 
-The virtual joystick sends short repeated ESP32 motion pulses while held.
+The virtual joystick sends one short ESP32 motion command every 150 ms while
+held, with at most one request in flight.
 Releasing the joystick, changing browser focus, or pressing STOP sends the
 stop command. Test with the wheels lifted before placing the rover on the
 ground.
@@ -258,6 +277,60 @@ Confirm the Pi is listening:
 Expected shape:
 
   tcp LISTEN 0 5 0.0.0.0:8080 0.0.0.0:* users:(...(python3...))
+
+PART 5B - LAPTOP VISION (BODY DETECTION, FACE RECOGNITION, FOLLOW)
+====================================================================
+
+One-time install on the laptop, while it has internet access (PowerShell):
+
+  git clone https://github.com/aadityapranav989-ai/surveillance-rover_PI.git
+  cd surveillance-rover_PI
+  python -m venv .venv
+  .venv\Scripts\pip install -r requirements.txt
+  .venv\Scripts\python scripts\download_models.py
+  .venv\Scripts\python -m unittest discover -s tests
+
+Run it:
+
+  1. Join the laptop to ESP32-Robot.
+  2. Confirm the Pi dashboard opens at http://192.168.4.10:8080/.
+  3. Start the vision app:
+
+       powershell -ExecutionPolicy Bypass -File scripts\run_laptop.ps1
+
+  4. Open http://127.0.0.1:8090/ on the laptop.
+
+The laptop dashboard shows the annotated camera: bodies in green, recognized
+faces in blue with their name, unknown faces in red, and the follow target in
+yellow. If it shows "hog" as the body detector or face recognition "off", run
+scripts\download_models.py again.
+
+Set CAMERA_HFOV_DEG (the rover webcam's horizontal field of view, default 60)
+and follow tuning such as FOLLOW_MAX_SPEED as environment variables in the
+same PowerShell window before running the script, for example:
+
+  $env:CAMERA_HFOV_DEG = "65"
+  $env:FOLLOW_MAX_SPEED = "120"
+
+Enroll faces:
+
+  - Under "Known faces": one person in view, facing the camera, 3-5 photos
+    from different angles. Photos are stored on the laptop in
+    faces\<name>\ and are never committed to Git.
+  - Only enroll people who have agreed to it.
+
+Follow mode:
+
+  - Under "Follow a person", choose Anyone or a named person and press
+    Start following. The rover turns towards the target, drives forward
+    while the target is far, and stops when the target is close or lost.
+  - STOP or any manual drive command on either dashboard ends follow mode.
+    The Pi then refuses follow commands until Start following is pressed
+    again on the laptop.
+  - If the laptop disconnects, the rover completes its last short step and
+    stops.
+  - Test follow mode with the wheels lifted first, then in an open area with
+    a low FOLLOW_MAX_SPEED.
 
 PART 6 - FIND PI IP AND OPEN DASHBOARD
 ======================================
@@ -398,6 +471,27 @@ Symptom: dashboard opens but GPS says waiting for fix
 4. Confirm the module uses 9600 baud.
 5. Watch the ESP32 serial monitor for GPS output.
 
+Symptom: laptop dashboard says "Camera offline"
+
+Check that the laptop is on ESP32-Robot and that
+http://192.168.4.10:8080/camera shows video in a browser. If it does, restart
+scripts\run_laptop.ps1. If it does not, check the Pi camera below.
+
+Symptom: Pi dashboard says "Camera offline"
+
+  v4l2-ctl --list-devices
+  groups pi                (must include video)
+  sudo systemctl status rover-dashboard
+
+Only one process on the Pi can open the webcam. Stop any manually started
+app.py or other camera program, then restart the service.
+
+Symptom: face shows as "unknown" or the wrong name
+
+Enroll more photos of the person in the rover's real lighting. Raise
+FACE_MATCH_THRESHOLD if the wrong name appears; lower it slightly if an
+enrolled person stays unknown.
+
 Symptom: SSH says REMOTE HOST IDENTIFICATION HAS CHANGED
 
 Only do this when you know the Pi was reinstalled or its host key changed:
@@ -435,6 +529,9 @@ On the Pi:
 
   cd /opt/raspberry-pi-rover
   git pull --ff-only
+  .venv/bin/pip install -r requirements.txt
+  sudo cp systemd/rover-dashboard.service /etc/systemd/system/
+  sudo systemctl daemon-reload
   sudo systemctl restart rover-dashboard
   sudo systemctl status rover-dashboard
 
@@ -458,6 +555,11 @@ Completion checklist
 [ ] Laptop opens http://PI_IP:8080/.
 [ ] GPS fix is visible outdoors.
 [ ] Forward, turn, and stop commands are tested with wheels lifted first.
+[ ] Laptop dashboard shows the rover camera through the Pi.
+[ ] Laptop dashboard shows mobilenet-ssd body detection and face recognition on.
+[ ] Enrolled faces show the correct name in the camera stream.
+[ ] Follow mode tested with wheels lifted, then in an open area.
+[ ] STOP on the Pi dashboard ends laptop follow mode.
 [ ] Emergency stop procedure is known before driving.
 
 Last verified workflow

@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raspberry Pi Rover</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:680px;margin:auto;padding:20px 16px 96px;background:#17212b;color:#f5f7fa}
+h1{color:#55d6be;margin-bottom:4px}
+h2{font-size:18px;margin:28px 0 8px;color:#55d6be}
+.status{padding:12px;background:#243442;border-radius:8px;margin:12px 0;line-height:1.6}
+.camera{width:100%;aspect-ratio:4/3;object-fit:contain;background:#0d141b;border-radius:8px;margin:12px 0;display:block}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row>*{flex:1;min-width:140px}
+button{min-height:42px;border:0;border-radius:8px;background:#2e8bdb;color:white;font-size:15px;cursor:pointer}
+button.secondary{background:#3b4d5e}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:360px;margin:20px auto}
+.grid button{min-height:56px}
+.mode{display:flex;gap:8px;margin:16px 0}.mode button{flex:1}
+.mode button.active{outline:2px solid #55d6be}
+.joystick{width:min(72vw,280px);aspect-ratio:1;margin:20px auto;background:#243442;border:2px solid #647484;border-radius:50%;position:relative;touch-action:none}
+.joystick:after{content:'';position:absolute;inset:18%;border:1px dashed #647484;border-radius:50%}
+.stick{position:absolute;width:76px;aspect-ratio:1;left:50%;top:50%;transform:translate(-50%,-50%);border:0;border-radius:50%;background:#2e8bdb;z-index:1;pointer-events:none}
+.stopbar{position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:#17212bee;text-align:center}
+.stop{min-height:52px;width:min(100%,360px);background:#d94b4b;font-size:18px;font-weight:700}
+label{display:block;margin:10px 0 4px}
+input,select{width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #647484;background:#243442;color:white;font-size:16px}
+small{color:#b9c5cf}
+ul{list-style:none;padding:0}
+li{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#243442;border-radius:8px;margin:6px 0}
+li button{min-height:34px;padding:0 14px;background:#3b4d5e}
+.following{color:#ffd23f;font-weight:600}
+</style>
+</head>
+<body>
+<h1>Raspberry Pi Rover</h1>
+<small>Commands go to: {{ESP32_URL}}</small>
+<div class="status" id="gps">Loading GPS...</div>
+<img class="camera" src="/camera" alt="Rover camera with detections">
+<div class="status" id="vision">Vision: starting...</div>
+
+<section id="visionControls" hidden>
+<h2>Follow a person</h2>
+<div class="row">
+  <select id="target" aria-label="Person to follow"><option value="">Anyone (closest person)</option></select>
+</div>
+<div class="row" style="margin-top:8px">
+  <button id="followStart">Start following</button>
+  <button id="followStop" class="secondary">Stop following</button>
+</div>
+<div class="status" id="followStatus">Follow mode off</div>
+<small>Any manual drive command or STOP ends follow mode. Test with the wheels lifted first.</small>
+
+<h2>Known faces</h2>
+<div class="row">
+  <input id="faceName" maxlength="32" placeholder="Name" aria-label="Name to enroll">
+  <button id="enroll">Enroll face from camera</button>
+</div>
+<small>Only one person in view, facing the camera. Enroll 3-5 photos per person with different angles and lighting. Only enroll people who have agreed to it.</small>
+<ul id="faces"></ul>
+</section>
+
+<h2>Manual driving</h2>
+<label for="speed">Speed (1-255)</label>
+<input id="speed" type="number" min="1" max="255" value="150">
+<div class="mode">
+  <button id="modeDpad" class="secondary">D-pad</button>
+  <button id="modeJoystick" class="secondary">Joystick</button>
+</div>
+<div id="dpad" class="grid">
+  <span></span><button data-move="FORWARD">Forward</button><span></span>
+  <button data-move="LEFT">Left</button><span></span><button data-move="RIGHT">Right</button>
+  <span></span><button data-move="BACKWARD">Backward</button><span></span>
+</div>
+<div class="joystick" id="joystick" aria-label="Rover navigation joystick"><div class="stick" id="stick"></div></div>
+
+<div class="stopbar"><button class="stop" id="stopAll">STOP</button></div>
+
+<script>
+const $ = selector => document.querySelector(selector);
+const speedEl = $('#speed'), joystick = $('#joystick'), stick = $('#stick');
+// FORWARD/BACKWARD value is centimeters, LEFT/RIGHT value is degrees.
+const STEP = {FORWARD: 5, BACKWARD: 5, LEFT: 10, RIGHT: 10};
+
+function speedLimit() { return Math.max(1, Math.min(255, Number(speedEl.value) || 150)); }
+
+async function post(url) {
+  const response = await fetch(url, {method: 'POST'});
+  let body = {};
+  try { body = await response.json(); } catch (e) {}
+  if (!response.ok) throw new Error(body.error || response.statusText);
+  return body;
+}
+
+function stop() { return post('/api/stop').catch(() => {}).finally(refreshVision); }
+
+// Only one movement request in flight; extra joystick ticks are dropped instead of queued.
+let moveInFlight = false;
+async function move(direction, speed, value) {
+  if (moveInFlight) return;
+  moveInFlight = true;
+  try { await post('/api/command?' + new URLSearchParams({direction, speed, value})); }
+  catch (e) {}
+  finally { moveInFlight = false; }
+}
+
+document.querySelectorAll('[data-move]').forEach(button => {
+  const direction = button.dataset.move;
+  button.addEventListener('click', () => move(direction, speedLimit(), STEP[direction]));
+});
+$('#stopAll').addEventListener('click', stop);
+
+function setMode(mode) {
+  $('#dpad').style.display = mode === 'dpad' ? 'grid' : 'none';
+  joystick.style.display = mode === 'joystick' ? 'block' : 'none';
+  $('#modeDpad').classList.toggle('active', mode === 'dpad');
+  $('#modeJoystick').classList.toggle('active', mode === 'joystick');
+}
+$('#modeDpad').addEventListener('click', () => { stop(); setMode('dpad'); });
+$('#modeJoystick').addEventListener('click', () => { stop(); setMode('joystick'); });
+setMode('joystick');
+
+// Joystick: pointer movement only updates the stick position. Commands go out on a
+// fixed tick, and the dead zone sends a single stop rather than one per tick.
+let active = false, joystickX = 0, joystickY = 0, joystickTimer = null, stopped = true;
+function joystickTick() {
+  const distance = Math.hypot(joystickX, joystickY);
+  if (distance < 0.12) {
+    if (!stopped) { stopped = true; stop(); }
+    return;
+  }
+  stopped = false;
+  const speed = Math.min(speedLimit(), Math.max(30, Math.round(distance * 255)));
+  const direction = Math.abs(joystickX) > Math.abs(joystickY)
+    ? (joystickX < 0 ? 'LEFT' : 'RIGHT')
+    : (joystickY < 0 ? 'FORWARD' : 'BACKWARD');
+  move(direction, speed, STEP[direction]);
+}
+function updateJoystick(event) {
+  const bounds = joystick.getBoundingClientRect(), radius = bounds.width / 2, limit = radius - 40;
+  let x = event.clientX - (bounds.left + radius), y = event.clientY - (bounds.top + radius);
+  const length = Math.hypot(x, y);
+  if (length > limit) { x = x * limit / length; y = y * limit / length; }
+  joystickX = x / limit; joystickY = y / limit;
+  stick.style.left = `${50 + joystickX * 40}%`;
+  stick.style.top = `${50 + joystickY * 40}%`;
+}
+function releaseJoystick() {
+  if (!active) return;
+  active = false;
+  clearInterval(joystickTimer);
+  joystickX = 0; joystickY = 0;
+  stick.style.left = '50%'; stick.style.top = '50%';
+  stopped = true;
+  stop();
+}
+joystick.addEventListener('pointerdown', event => {
+  active = true;
+  joystick.setPointerCapture(event.pointerId);
+  updateJoystick(event);
+  joystickTick();
+  clearInterval(joystickTimer);
+  joystickTimer = setInterval(joystickTick, 150);
+});
+joystick.addEventListener('pointermove', event => { if (active) updateJoystick(event); });
+joystick.addEventListener('pointerup', releaseJoystick);
+joystick.addEventListener('pointercancel', releaseJoystick);
+window.addEventListener('blur', releaseJoystick);
+document.addEventListener('visibilitychange', () => { if (document.hidden) releaseJoystick(); });
+
+// Follow mode and faces.
+$('#followStart').addEventListener('click', () =>
+  post('/api/follow?' + new URLSearchParams({target: $('#target').value}))
+    .catch(e => alert(e.message)).finally(refreshVision));
+$('#followStop').addEventListener('click', () =>
+  post('/api/follow/stop').catch(e => alert(e.message)).finally(refreshVision));
+$('#enroll').addEventListener('click', async () => {
+  const name = $('#faceName').value.trim();
+  if (!name) { alert('Enter a name first.'); return; }
+  try {
+    const result = await post('/api/faces/enroll?' + new URLSearchParams({name}));
+    alert(`Saved photo ${result.samples} for ${result.name}.`);
+  } catch (e) { alert('Enroll failed: ' + e.message); }
+  refreshVision();
+});
+
+let knownKey = '';
+function renderFaces(known) {
+  const key = JSON.stringify(known);
+  if (key === knownKey) return;
+  knownKey = key;
+  const list = $('#faces');
+  list.replaceChildren();
+  const select = $('#target'), selected = select.value;
+  select.replaceChildren(new Option('Anyone (closest person)', ''));
+  for (const person of known) {
+    select.add(new Option(person.name, person.name));
+    const item = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = `${person.name} (${person.samples} photo${person.samples === 1 ? '' : 's'})`;
+    const remove = document.createElement('button');
+    remove.textContent = 'Delete';
+    remove.addEventListener('click', async () => {
+      if (!confirm(`Delete all photos of ${person.name}?`)) return;
+      await post('/api/faces/delete?' + new URLSearchParams({name: person.name})).catch(e => alert(e.message));
+      refreshVision();
+    });
+    item.append(label, remove);
+    list.append(item);
+  }
+  if (!known.length) {
+    const item = document.createElement('li');
+    item.textContent = 'No faces enrolled yet.';
+    list.append(item);
+  }
+  select.value = known.some(p => p.name === selected) ? selected : '';
+}
+
+async function refreshVision() {
+  try {
+    const data = await (await fetch('/api/vision')).json();
+    const v = data.vision;
+    $('#visionControls').hidden = !v;
+    if (!v) {
+      // Pi gateway: vision and follow mode run on the laptop.
+      const a = data.autopilot;
+      $('#vision').textContent = (data.camera.online ? 'Camera streaming' : `Camera offline: ${data.camera.error}`)
+        + ' · Laptop follow mode: '
+        + (a.blocked ? 'blocked by STOP/manual control (restart it from the laptop)' : a.active ? 'DRIVING' : 'idle');
+      $('#vision').classList.toggle('following', a.active && !a.blocked);
+      return;
+    }
+    let text;
+    if (!data.camera.online) {
+      text = `Camera offline: ${data.camera.error}`;
+    } else {
+      const names = v.faces.map(f => f.name || 'unknown');
+      text = `${v.fps} fps · ${v.persons.length} person${v.persons.length === 1 ? '' : 's'}`
+        + (names.length ? ` · faces: ${names.join(', ')}` : '');
+    }
+    text += `\nBody detector: ${v.person_backend} · face recognition: ${v.face_recognition ? 'on' : 'off (models missing)'}`;
+    $('#vision').innerText = text;
+    const f = data.follow, status = $('#followStatus');
+    status.textContent = f.enabled ? `Following ${f.target || 'anyone'}: ${f.state}`
+      : 'Follow mode off' + (f.state === 'off' ? '' : ` (${f.state})`);
+    status.classList.toggle('following', f.enabled);
+    renderFaces(data.known_faces);
+  } catch (e) {
+    $('#vision').textContent = 'Pi connection lost';
+  }
+}
+
+async function refreshGps() {
+  try {
+    const d = await (await fetch('/api/status')).json(), g = d.gps;
+    $('#gps').innerHTML = g.fix
+      ? `GPS fix<br>Lat: ${g.latitude.toFixed(6)}<br>Lon: ${g.longitude.toFixed(6)}<br>Alt: ${g.altitude.toFixed(1)} m | Satellites: ${g.satellites}`
+      : 'Waiting for GPS fix';
+  } catch (e) {
+    $('#gps').textContent = 'ESP32 connection lost';
+  }
+}
+setInterval(refreshGps, 1000); refreshGps();
+setInterval(refreshVision, 500); refreshVision();
+</script>
+</body>
+</html>

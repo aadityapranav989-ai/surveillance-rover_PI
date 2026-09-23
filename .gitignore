@@ -2,3 +2,7 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
+# Downloaded by scripts/download_models.sh
+models/
+# Enrolled face photos are personal data; keep them on the Pi only.
+faces/
