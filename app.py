@@ -4,13 +4,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
-from config import ESP32_URL, HOST, PORT, REQUEST_TIMEOUT
+from config import CAMERA_STREAM_URL, ESP32_URL, HOST, PORT, REQUEST_TIMEOUT
 
 DASHBOARD = """<!doctype html>
 <html><head><meta name=viewport content='width=device-width,initial-scale=1'>
 <title>Raspberry Pi Rover</title><style>
 body{font-family:system-ui,sans-serif;max-width:680px;margin:auto;padding:20px;background:#17212b;color:#f5f7fa}
 h1{color:#55d6be}.status{padding:12px;background:#243442;border-radius:8px;margin:12px 0}
+.camera{width:100%;aspect-ratio:16/9;object-fit:cover;background:#0d141b;border-radius:8px;margin:12px 0}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:360px;margin:20px auto}
 button{min-height:58px;border:0;border-radius:8px;background:#2e8bdb;color:white;font-size:16px;font-weight:600}
 .stop{background:#d94b4b;grid-column:2}label{display:block;margin:10px 0 4px}
@@ -18,6 +19,7 @@ input{width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px
 small{color:#b9c5cf}#gps{line-height:1.7}
 </style></head><body><h1>Raspberry Pi Rover</h1>
 <small>Pi gateway: ESP32_URL_PLACEHOLDER</small><div class=status id=gps>Loading GPS...</div>
+CAMERA_PANEL
 <label>Speed (0-255)</label><input id=speed type=number min=1 max=255 value=150>
 <label>Distance (cm) or turn (degrees)</label><input id=value type=number min=1 max=10000 value=20>
 <div class=grid><span></span><button onclick="move('FORWARD')">Forward</button><span></span>
@@ -29,7 +31,7 @@ async function stop(){await fetch('/api/stop',{method:'POST'});}
 const speedEl=document.querySelector('#speed'),valueEl=document.querySelector('#value');
 async function refresh(){try{let d=await (await fetch('/api/status')).json();let g=d.gps;document.querySelector('#gps').innerHTML=g.fix?`GPS fix<br>Lat: ${g.latitude.toFixed(6)}<br>Lon: ${g.longitude.toFixed(6)}<br>Alt: ${g.altitude.toFixed(1)} m | Satellites: ${g.satellites}`:'Waiting for GPS fix';}catch(e){document.querySelector('#gps').textContent='ESP32 connection lost';}}
 setInterval(refresh,1000);refresh();
-</script></body></html>""".replace("ESP32_URL_PLACEHOLDER", ESP32_URL)
+</script></body></html>""".replace("ESP32_URL_PLACEHOLDER", ESP32_URL).replace("CAMERA_PANEL", "<img class=camera src='" + CAMERA_STREAM_URL + "' alt='Phone camera stream'>" if CAMERA_STREAM_URL else "<div class=status>Camera not configured. Set CAMERA_STREAM_URL on the Pi.</div>")
 
 
 def esp32_request(path, method="GET"):

@@ -172,11 +172,26 @@ Create the systemd environment configuration:
 
   sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
 ESP32_URL=http://192.168.192.131
+  CAMERA_STREAM_URL=
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
 
 Replace 192.168.192.131 with the current ESP32 IP if it changed.
+
+For the temporary phone-camera phase, set CAMERA_STREAM_URL to the MJPEG
+URL provided by the phone camera app. Examples used by camera apps include:
+
+  CAMERA_STREAM_URL=http://PHONE_IP:8080/video
+  CAMERA_STREAM_URL=http://PHONE_IP:8080/stream
+
+The phone, Pi, and ESP32 must be on the same Wi-Fi network. Restart the
+service after changing this value:
+
+  sudo systemctl restart rover-dashboard
+
+The dashboard currently displays the phone stream only. Person detection and
+autonomous movement will be added after the video stream is confirmed.
 
 Install or refresh the systemd service:
 

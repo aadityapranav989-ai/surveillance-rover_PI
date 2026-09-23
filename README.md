@@ -56,6 +56,26 @@ To configure a different ESP32 address:
 ESP32_URL=http://192.168.1.50 python3 app.py
 ```
 
+## Phone camera preview
+
+Install a phone camera app that provides an MJPEG stream, then set its stream
+URL in `/etc/default/rover-dashboard`. Common apps expose URLs similar to
+`http://PHONE_IP:8080/video` or `http://PHONE_IP:8080/stream`.
+
+```ini
+CAMERA_STREAM_URL=http://PHONE_IP:8080/video
+```
+
+The phone, Pi, and ESP32 must be on the same Wi-Fi network. Restart the
+service and reload the Pi dashboard:
+
+```bash
+sudo systemctl restart rover-dashboard
+```
+
+This first phase only displays the stream. It does not yet detect people or
+move the rover automatically.
+
 ## Run automatically with systemd
 
 Create the environment file:
@@ -63,6 +83,7 @@ Create the environment file:
 ```bash
 sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
 ESP32_URL=http://192.168.4.1
+CAMERA_STREAM_URL=
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
