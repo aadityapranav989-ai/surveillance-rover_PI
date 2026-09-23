@@ -232,13 +232,17 @@ function stop() { return post('/api/stop').catch(() => {}).finally(refreshVision
 
 // Only one movement request in flight; extra joystick ticks are dropped instead of queued.
 let moveInFlight = false;
-async function move(direction, speed, value) {
+async function send(url) {
   if (moveInFlight) return;
   moveInFlight = true;
-  try { await post('/api/command?' + new URLSearchParams({direction, speed, value})); }
+  try { await post(url); }
   catch (e) {}
   finally { moveInFlight = false; }
 }
+function move(direction, speed, value) { send('/api/command?' + new URLSearchParams({direction, speed, value})); }
+// Separate left/right wheel speeds: the joystick can curve instead of only driving straight or spinning.
+function drive(left, right, ms) { send('/api/drive?' + new URLSearchParams({left, right, ms})); }
+const JOYSTICK_MS = 400;  // each command outlasts the 150 ms tick (with room for a slow one), so held movement is continuous
 
 document.querySelectorAll('[data-move]').forEach(button => {
   const direction = button.dataset.move;
@@ -258,19 +262,24 @@ setMode('joystick');
 
 // Joystick: pointer movement only updates the stick position. Commands go out on a
 // fixed tick, and the dead zone sends a single stop rather than one per tick.
+// Up/down sets the forward speed and left/right bends the path, so a diagonal
+// push drives in a curve; straight left/right turns on the spot.
 let active = false, joystickX = 0, joystickY = 0, joystickTimer = null, stopped = true;
 function joystickTick() {
-  const distance = Math.hypot(joystickX, joystickY);
+  const distance = Math.min(1, Math.hypot(joystickX, joystickY));
   if (distance < 0.12) {
     if (!stopped) { stopped = true; stop(); }
     return;
   }
   stopped = false;
-  const speed = Math.min(speedLimit(), Math.max(30, Math.round(distance * 255)));
-  const direction = Math.abs(joystickX) > Math.abs(joystickY)
-    ? (joystickX < 0 ? 'LEFT' : 'RIGHT')
-    : (joystickY < 0 ? 'FORWARD' : 'BACKWARD');
-  move(direction, speed, STEP[direction]);
+  const forward = -joystickY;
+  // Soften turning while moving so a diagonal push is a gentle curve; full sideways still spins.
+  const turn = joystickX * (1 - 0.5 * Math.abs(forward));
+  const left = forward + turn, right = forward - turn;
+  // Scale so the faster side runs at the stick's distance times the speed limit.
+  const power = Math.min(speedLimit(), Math.max(30, distance * speedLimit()));
+  const scale = power / Math.max(Math.abs(left), Math.abs(right));
+  drive(Math.round(left * scale), Math.round(right * scale), JOYSTICK_MS);
 }
 function updateJoystick(event) {
   const bounds = joystick.getBoundingClientRect(), radius = bounds.width / 2, limit = radius - 34;

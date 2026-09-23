@@ -149,6 +149,23 @@ class RoverHandler(BaseHTTPRequestHandler):
                 self.autopilot.block()
                 self.stop_following("manual control")
             self.proxy("/api/command?" + urlencode({"direction": direction, "speed": speed, "value": value}), "POST")
+        elif parsed.path == "/api/drive":
+            try:
+                left, right, ms = int(param("left")), int(param("right")), int(param("ms"))
+            except ValueError:
+                self.send_json(400, {"error": "left, right and ms must be whole numbers"})
+                return
+            if not (-255 <= left <= 255 and -255 <= right <= 255 and 1 <= ms <= 1000):
+                self.send_json(400, {"error": "left and right must be -255..255 and ms 1..1000"})
+                return
+            if automatic:
+                if not self.autopilot.allow_command():
+                    self.send_json(OPERATOR_STOP, {"error": "follow mode stopped by an operator"})
+                    return
+            else:
+                self.autopilot.block()
+                self.stop_following("manual control")
+            self.relay(esp32.drive, left, right, ms)
         elif parsed.path == "/api/autopilot/resume":
             self.autopilot.resume()
             self.send_json(200, self.autopilot.status())
@@ -190,8 +207,12 @@ class RoverHandler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "not found"})
 
     def proxy(self, path, method):
+        self.relay(esp32.esp32_request, path, method)
+
+    def relay(self, function, *args):
+        """Sends a request to the rover and passes its answer back to the browser."""
         try:
-            status, payload, content_type = esp32.esp32_request(path, method)
+            status, payload, content_type = function(*args)
             self.send_payload(status, payload, content_type)
         except (URLError, TimeoutError, OSError) as error:
             self.send_json(502, {"error": "rover unavailable", "detail": str(error)})
@@ -217,8 +238,8 @@ def start_vision(camera):
         max_speed=config.FOLLOW_MAX_SPEED,
         turn_min_speed=config.FOLLOW_TURN_MIN_SPEED,
         turn_max_speed=config.FOLLOW_TURN_MAX_SPEED,
-        step_cm=config.FOLLOW_STEP_CM,
-        turn_step_deg=config.FOLLOW_TURN_STEP_DEG,
+        steer_gain=config.FOLLOW_STEER_GAIN,
+        command_ms=config.FOLLOW_COMMAND_MS,
         center_enter=config.FOLLOW_CENTER_ENTER,
         center_exit=config.FOLLOW_CENTER_EXIT,
         stop_body_height=config.FOLLOW_STOP_BODY_HEIGHT,

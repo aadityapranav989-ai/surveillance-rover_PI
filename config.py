@@ -27,6 +27,10 @@ ESP32_URL = os.getenv("ESP32_URL", "http://192.168.4.1").rstrip("/")
 HOST = os.getenv("ROVER_HOST", "0.0.0.0")
 PORT = _int("ROVER_PORT", 8080)
 REQUEST_TIMEOUT = _float("ESP32_TIMEOUT", 3)
+# ESP32 motion calibration (DISTANCE_MS_PER_CM and TURN_MS_PER_DEGREE in its
+# src/config.h), used to translate curved drives for firmware without /api/drive.
+ESP32_MS_PER_CM = _float("ESP32_MS_PER_CM", 15.3)
+ESP32_MS_PER_DEGREE = _float("ESP32_MS_PER_DEGREE", 11.4)
 
 # Camera. CAMERA_STREAM_URL (a phone/network MJPEG stream) takes priority over
 # the local USB webcam at CAMERA_DEVICE. Either way the Pi reads the frames,
@@ -67,19 +71,23 @@ ALERT_CLEAR_AFTER = _float("ALERT_CLEAR_AFTER", 2)
 # Remembers the alert mode (safe/detection) across restarts.
 SETTINGS_FILE = os.getenv("SETTINGS_FILE", os.path.join(BASE_DIR, "settings.json"))
 
-# Follow mode. The ESP32 runs each command for 15.3 ms per cm or 11.4 ms per
-# degree, so the step lengths below (about 0.6 s each) outlast the command
-# interval and the rover moves continuously instead of stop-start. If the Pi
-# stops sending, the rover still halts within one step.
+# Follow mode. Each command runs for FOLLOW_COMMAND_MS, longer than the
+# command interval, so the rover moves continuously instead of stop-start. If
+# the Pi stops sending, the rover still halts within one command.
 FOLLOW_INTERVAL = _float("FOLLOW_INTERVAL", 0.25)
+FOLLOW_COMMAND_MS = _int("FOLLOW_COMMAND_MS", 600)
 FOLLOW_MIN_SPEED = _int("FOLLOW_MIN_SPEED", 90)
 FOLLOW_MAX_SPEED = _int("FOLLOW_MAX_SPEED", 150)
+# While approaching, the rover curves towards the person: the outer side runs
+# up to FOLLOW_STEER_GAIN faster than the inner side when they are at the edge
+# of the frame.
+FOLLOW_STEER_GAIN = _int("FOLLOW_STEER_GAIN", 110)
+# Once close, it turns on the spot to keep facing the person.
 FOLLOW_TURN_MIN_SPEED = _int("FOLLOW_TURN_MIN_SPEED", 85)
 FOLLOW_TURN_MAX_SPEED = _int("FOLLOW_TURN_MAX_SPEED", 130)
-FOLLOW_STEP_CM = _float("FOLLOW_STEP_CM", 40)
-FOLLOW_TURN_STEP_DEG = _float("FOLLOW_TURN_STEP_DEG", 50)
-# Start turning when the person is this far off-center (fraction of the frame
-# width), and keep turning until they are back within FOLLOW_CENTER_EXIT.
+# When close, start turning on the spot once the person is this far off-center
+# (fraction of the frame width), and stop once back within FOLLOW_CENTER_EXIT.
+# FOLLOW_CENTER_EXIT is also the steering dead zone while approaching.
 FOLLOW_CENTER_ENTER = _float("FOLLOW_CENTER_ENTER", 0.15)
 FOLLOW_CENTER_EXIT = _float("FOLLOW_CENTER_EXIT", 0.06)
 # Stop approaching once the target fills this fraction of the frame height,

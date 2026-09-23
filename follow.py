@@ -13,12 +13,12 @@ OPERATOR_STOP = 423  # "Locked": the Pi gateway refuses follow commands after an
 class FollowSettings:
     min_speed: int
     max_speed: int
-    turn_min_speed: int
+    turn_min_speed: int  # turning on the spot, used once close to the person
     turn_max_speed: int
-    step_cm: float  # length of each forward command; outlasts the interval so motion is continuous
-    turn_step_deg: float  # length of each turn command, for the same reason
-    center_enter: float  # start turning when the target is this far off-center (fraction of width)
-    center_exit: float  # stop turning once it is back within this
+    steer_gain: int  # wheel speed difference when the person is at the edge of the frame
+    command_ms: int  # each command's run time; outlasts the interval so motion is continuous
+    center_enter: float  # when close, start turning on the spot at this offset (fraction of width)
+    center_exit: float  # ...and stop once back within this; also the steering dead zone
     stop_body_height: float
     stop_face_height: float
     resume_margin: float  # after stopping close to the target, drive again once it shrinks by this fraction
@@ -68,12 +68,13 @@ def select_target(result, target_name, previous_box):
 
 
 class Steering:
-    """Turns noisy target boxes into smooth drive commands.
+    """Turns noisy target boxes into smooth wheel speeds.
 
-    The target's position and size are smoothed across frames, turning and
-    stopping use hysteresis so the rover does not flip between actions, and
-    speed changes gradually. The ESP32 only drives straight or turns on the
-    spot, so the rover turns until the target is centered, then drives.
+    While approaching, the rover drives in a curve: both sides move forward and
+    the side away from the person runs faster, so it bends towards them in one
+    motion. Once close enough it only turns on the spot to keep facing them.
+    The target's position and size are smoothed across frames, stopping and
+    turning use hysteresis, and forward speed changes gradually.
     """
 
     def __init__(self, settings):
@@ -86,8 +87,7 @@ class Steering:
         self.kind = None
         self.turning = False
         self.holding = False
-        self.direction = None
-        self.speed = 0
+        self.base = 0  # current forward speed
 
     def observe(self, box, kind, frame_width, frame_height):
         x, y, w, h = box
@@ -102,35 +102,45 @@ class Steering:
         self.kind = kind
 
     def command(self):
-        """Returns (direction, speed, value), or None when the rover should hold still."""
+        """Returns (left, right) wheel speeds, or None when the rover should hold still."""
         s = self.settings
-        limit = s.center_exit if self.turning else s.center_enter
-        self.turning = abs(self.offset) > limit
-        if self.turning:
-            strength = min(1.0, (abs(self.offset) - s.center_exit) / (0.5 - s.center_exit))
-            speed = s.turn_min_speed + (s.turn_max_speed - s.turn_min_speed) * strength
-            direction = "RIGHT" if self.offset > 0 else "LEFT"
-            return direction, self._ramp(direction, speed, s.turn_min_speed), s.turn_step_deg
-
         stop_height = s.stop_body_height if self.kind == "body" else s.stop_face_height
         limit = stop_height * (1 - s.resume_margin) if self.holding else stop_height
         self.holding = self.size >= limit
         if self.holding:
-            self.direction, self.speed = None, 0
-            return None
-        closeness = min(1.0, self.size / stop_height)  # 0 = far away, 1 = close enough
-        speed = s.max_speed - (s.max_speed - s.min_speed) * closeness
-        return "FORWARD", self._ramp("FORWARD", speed, s.min_speed), s.step_cm
+            self.base = 0
+            return self._face_on_the_spot()
+        self.turning = False
 
-    def _ramp(self, direction, target, floor):
-        """Moves the speed gradually towards target, never below the speed that moves the rover."""
-        step = self.settings.max_speed_change
-        if direction != self.direction:
-            speed = min(target, floor + step)  # starting or changing direction: begin gently
+        closeness = min(1.0, self.size / stop_height)  # 0 = far away, 1 = close enough
+        target = s.max_speed - (s.max_speed - s.min_speed) * closeness
+        # Ease off when the person is far to one side, so the curve can be tighter.
+        sharpness = min(1.0, max(0.0, abs(self.offset) - 0.2) / 0.3)
+        base = self._ramp(target * (1 - 0.4 * sharpness))
+        steer = 0.0 if abs(self.offset) < s.center_exit else s.steer_gain * self.offset / 0.5
+        left = max(-255, min(255, round(base + steer)))
+        right = max(-255, min(255, round(base - steer)))
+        return left, right
+
+    def _face_on_the_spot(self):
+        s = self.settings
+        limit = s.center_exit if self.turning else s.center_enter
+        self.turning = abs(self.offset) > limit
+        if not self.turning:
+            return None
+        strength = min(1.0, (abs(self.offset) - s.center_exit) / (0.5 - s.center_exit))
+        speed = round(s.turn_min_speed + (s.turn_max_speed - s.turn_min_speed) * strength)
+        return (speed, -speed) if self.offset > 0 else (-speed, speed)
+
+    def _ramp(self, target):
+        """Moves the forward speed gradually towards target, never below the speed that moves the rover."""
+        s = self.settings
+        if self.base == 0:
+            speed = min(target, s.min_speed + s.max_speed_change)  # starting: begin gently
         else:
-            speed = max(self.speed - step, min(self.speed + step, target))
-        self.direction, self.speed = direction, max(floor, round(speed))
-        return self.speed
+            speed = max(self.base - s.max_speed_change, min(self.base + s.max_speed_change, target))
+        self.base = max(s.min_speed, round(speed))
+        return self.base
 
 
 class FollowController(threading.Thread):
@@ -229,10 +239,10 @@ class FollowController(threading.Thread):
         if command is None:
             self._hold("reached target")
             return
-        direction, speed, value = command
-        self.state = f"tracking ({direction.lower()} at speed {speed})"
+        left, right = command
+        self.state = f"tracking (left {left} / right {right})"
         self._moving = True
-        if self._send(esp32.send_command, direction, speed, value, esp32.AUTO) == OPERATOR_STOP:
+        if self._send(esp32.drive, left, right, self.settings.command_ms, esp32.AUTO) == OPERATOR_STOP:
             # Someone pressed STOP or drove manually on the Pi dashboard.
             self.enabled = False
             self._moving = False

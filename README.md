@@ -202,26 +202,30 @@ On the dashboard (the Pi's, or the laptop's when vision runs there) under
   visible, it steers towards the face.
 
 Every `FOLLOW_INTERVAL` (0.25 s) one command is sent. Each command runs for
-about 0.6 s (`FOLLOW_STEP_CM`, `FOLLOW_TURN_STEP_DEG`), so the next one
-arrives before it ends and the rover moves continuously instead of
-stop-start:
+`FOLLOW_COMMAND_MS` (0.6 s), so the next one arrives before it ends and the
+rover moves continuously instead of stop-start:
 
-- Target off-center (beyond `FOLLOW_CENTER_ENTER`): turn `LEFT`/`RIGHT`,
-  faster the further off-center it is (`FOLLOW_TURN_MIN_SPEED` to
-  `FOLLOW_TURN_MAX_SPEED`), until it is back within `FOLLOW_CENTER_EXIT`.
-- Target centered: drive `FORWARD`, faster when the person is farther away
+- Approaching: the rover drives towards the person in a curve. Both sides
+  move forward and the side away from the person runs faster (up to
+  `FOLLOW_STEER_GAIN` faster at the edge of the frame), so it bends towards
+  them in one motion. It is faster when the person is farther away
   (`FOLLOW_MIN_SPEED` to `FOLLOW_MAX_SPEED`).
 - Target fills `FOLLOW_STOP_BODY_HEIGHT` of the frame height: stop (close
   enough). It drives again once the person has moved away by
-  `FOLLOW_RESUME_MARGIN`, so it does not creep back and forth.
+  `FOLLOW_RESUME_MARGIN`, so it does not creep back and forth. While close,
+  it turns on the spot (`FOLLOW_TURN_MIN_SPEED` to `FOLLOW_TURN_MAX_SPEED`)
+  to keep facing the person once they move beyond `FOLLOW_CENTER_ENTER`.
 - Target not detected for a moment: keep going for up to
   `FOLLOW_LOST_GRACE` (0.8 s) instead of stopping on every missed frame.
   Lost for longer, or the camera stream freezes: stop and wait.
 
 To keep this smooth, the target's position is averaged across frames
 (`FOLLOW_SMOOTHING`) and the speed changes by at most
-`FOLLOW_MAX_SPEED_CHANGE` per command. The ESP32 drives straight or turns on
-the spot, so the rover turns until the person is centered, then drives.
+`FOLLOW_MAX_SPEED_CHANGE` per command.
+
+Curved driving uses the ESP32's `/api/drive` command. With older ESP32
+firmware the Pi falls back to straight and spin commands automatically
+(and logs a notice), so flash the latest firmware for smooth curves.
 
 Stopping follow mode:
 
@@ -241,11 +245,14 @@ Drag the stick away from the center to choose direction and speed:
 
 - Up: forward
 - Down: backward
-- Left/right: turn
+- Diagonal: drive in a curve (a slight push sideways gives a gentle curve)
+- Fully left/right: turn on the spot
 - Farther from center: faster movement
 
 While the stick is held, the dashboard sends one short movement command every
-150 ms, and never more than one at a time. Release the stick, move it to the
+150 ms, and never more than one at a time. Each command sets the left and
+right wheel speeds separately (`/api/drive`), and the ESP32 ramps between
+speeds, so movement is smooth. Release the stick, move it to the
 center, switch browser tabs, or press `STOP` to stop the ESP32. The D-pad
 uses the same speed box as the joystick.
 
@@ -280,6 +287,7 @@ Both roles serve these:
 | GET | `/api/status` | ESP32 status (GPS), proxied |
 | GET | `/api/vision` | Camera state, detections, follow state, enrolled faces, autopilot latch |
 | POST | `/api/command?direction=&speed=&value=` | Manual move; ends follow mode |
+| POST | `/api/drive?left=&right=&ms=` | Manual move with separate wheel speeds (-255..255) for up to 1000 ms; ends follow mode |
 | POST | `/api/stop` | Stop the rover; ends follow mode |
 
 Pi gateway only:

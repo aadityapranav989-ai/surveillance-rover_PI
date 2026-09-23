@@ -8,7 +8,7 @@ from follow import FollowController, FollowSettings, Steering, iou, select_targe
 from vision import Detection, VisionResult  # noqa: E402
 
 SETTINGS = FollowSettings(min_speed=90, max_speed=150, turn_min_speed=85, turn_max_speed=130,
-                          step_cm=40, turn_step_deg=50, center_enter=0.15, center_exit=0.06,
+                          steer_gain=110, command_ms=600, center_enter=0.15, center_exit=0.06,
                           stop_body_height=0.8, stop_face_height=0.25, resume_margin=0.12,
                           smoothing=0.5, max_speed_change=20, lost_grace=0.8, track_memory=3,
                           interval=0.25)
@@ -33,45 +33,53 @@ def steering_for(box):
 
 
 class SteeringTest(unittest.TestCase):
-    def test_turns_towards_person_off_center(self):
-        direction, speed, degrees = steering_for(body_at(0.85, 0.4)).command()
-        self.assertEqual(direction, "RIGHT")
-        self.assertEqual(degrees, 50)
-        self.assertGreaterEqual(speed, 85)
-        self.assertEqual(steering_for(body_at(0.1, 0.4)).command()[0], "LEFT")
+    def test_drives_straight_when_person_is_centered(self):
+        left, right = steering_for(body_at(0.52, 0.4)).command()
+        self.assertEqual(left, right, "inside the dead zone: no steering")
+        self.assertGreater(left, 0)
 
-    def test_turn_speed_grows_with_offset(self):
-        slight = steering_for(body_at(0.7, 0.4))
-        far = steering_for(body_at(0.95, 0.4))
-        for _ in range(5):  # let the ramp settle
-            slight_speed = slight.command()[1]
-            far_speed = far.command()[1]
-        self.assertGreater(far_speed, slight_speed)
+    def test_curves_towards_person_off_center(self):
+        left, right = steering_for(body_at(0.75, 0.4)).command()
+        self.assertGreater(left, right, "person on the right: left side runs faster")
+        self.assertGreater(right, 0, "still moving forward on both sides: a curve, not a spin")
+        left, right = steering_for(body_at(0.25, 0.4)).command()
+        self.assertGreater(right, left)
 
-    def test_turning_hysteresis(self):
-        steering = steering_for(body_at(0.6, 0.4))  # 0.10 off-center: inside the enter band
-        self.assertEqual(steering.command()[0], "FORWARD")
-        steering = steering_for(body_at(0.75, 0.4))  # starts turning
-        self.assertEqual(steering.command()[0], "RIGHT")
-        steering.offset = 0.10  # nearly centered: keeps turning until within center_exit
-        self.assertEqual(steering.command()[0], "RIGHT")
-        steering.offset = 0.04
-        self.assertEqual(steering.command()[0], "FORWARD")
+    def test_curve_tightens_with_offset(self):
+        gentle = steering_for(body_at(0.6, 0.4)).command()
+        sharp = steering_for(body_at(0.9, 0.4)).command()
+        self.assertGreater(sharp[0] - sharp[1], gentle[0] - gentle[1])
 
-    def test_drives_forward_faster_when_far(self):
+    def test_faster_when_far(self):
         far, near = steering_for(body_at(0.5, 0.2)), steering_for(body_at(0.5, 0.6))
         for _ in range(6):
-            far_command, near_command = far.command(), near.command()
-        self.assertEqual(far_command[0], "FORWARD")
-        self.assertEqual(far_command[2], 40)
-        self.assertGreater(far_command[1], near_command[1])
+            far_speeds, near_speeds = far.command(), near.command()
+        self.assertGreater(far_speeds[0], near_speeds[0])
 
     def test_speed_ramps_up_gradually(self):
         steering = steering_for(body_at(0.5, 0.1))
-        speeds = [steering.command()[1] for _ in range(5)]
+        speeds = [steering.command()[0] for _ in range(5)]
         self.assertEqual(speeds[0], 110, "starts gently: minimum plus one step")
         self.assertTrue(all(b - a <= 20 for a, b in zip(speeds, speeds[1:])))
         self.assertEqual(speeds[-1], 142, "settles at the target speed for this distance")
+
+    def test_close_and_centered_holds_still(self):
+        self.assertIsNone(steering_for(body_at(0.5, 0.85)).command())
+
+    def test_close_and_off_center_turns_on_the_spot(self):
+        left, right = steering_for(body_at(0.8, 0.85)).command()
+        self.assertEqual(left, -right)
+        self.assertGreater(left, 0, "person on the right: spin right")
+
+    def test_on_the_spot_turn_hysteresis(self):
+        steering = steering_for(body_at(0.62, 0.85))  # 0.12 off: inside the enter band
+        self.assertIsNone(steering.command())
+        steering.offset = 0.2
+        self.assertIsNotNone(steering.command())
+        steering.offset = 0.1  # keeps turning until within center_exit
+        self.assertIsNotNone(steering.command())
+        steering.offset = 0.04
+        self.assertIsNone(steering.command())
 
     def test_stop_distance_hysteresis(self):
         steering = steering_for(body_at(0.5, 0.85))
@@ -79,7 +87,7 @@ class SteeringTest(unittest.TestCase):
         steering.size = 0.75  # stepped back a little: still holding
         self.assertIsNone(steering.command())
         steering.size = 0.65  # clearly further away: drive again
-        self.assertEqual(steering.command()[0], "FORWARD")
+        self.assertIsNotNone(steering.command())
 
     def test_smooths_jittery_detections(self):
         steering = steering_for(body_at(0.5, 0.4))
@@ -99,8 +107,8 @@ class FollowControllerTest(unittest.TestCase):
         self.now = 100.0
         import esp32
         self.esp32 = esp32
-        self.saved = esp32.send_command, esp32.send_stop, esp32.resume_autopilot
-        esp32.send_command = lambda *args: self.sent.append(args[0]) or (200, b"", "")
+        self.saved = esp32.drive, esp32.send_stop, esp32.resume_autopilot
+        esp32.drive = lambda left, right, ms, source: self.sent.append("DRIVE") or (200, b"", "")
         esp32.send_stop = lambda *args: self.sent.append("STOP") or (200, b"", "")
         esp32.resume_autopilot = lambda: (200, b"", "")
         self.vision = FakeVision()
@@ -109,7 +117,7 @@ class FollowControllerTest(unittest.TestCase):
         self.frame = 0
 
     def tearDown(self):
-        self.esp32.send_command, self.esp32.send_stop, self.esp32.resume_autopilot = self.saved
+        self.esp32.drive, self.esp32.send_stop, self.esp32.resume_autopilot = self.saved
 
     def tick(self, persons, advance=0.25):
         self.now += advance
@@ -122,21 +130,21 @@ class FollowControllerTest(unittest.TestCase):
         self.tick([person])
         self.tick([])  # one missed frame
         self.tick([person])
-        self.assertEqual(self.sent, ["FORWARD", "FORWARD"])
+        self.assertEqual(self.sent, ["DRIVE", "DRIVE"])
 
     def test_stops_once_person_is_really_gone(self):
         person = Detection(body_at(0.5, 0.3), 0.9)
         self.tick([person])
         for _ in range(4):  # 1 s without the person
             self.tick([])
-        self.assertEqual(self.sent, ["FORWARD", "STOP"])
+        self.assertEqual(self.sent, ["DRIVE", "STOP"])
         self.assertEqual(self.follow.state, "searching")
 
     def test_sends_every_tick_while_tracking(self):
         person = Detection(body_at(0.5, 0.3), 0.9)
         for _ in range(4):
             self.tick([person])
-        self.assertEqual(self.sent, ["FORWARD"] * 4)
+        self.assertEqual(self.sent, ["DRIVE"] * 4)
 
 
 class SelectTargetTest(unittest.TestCase):
