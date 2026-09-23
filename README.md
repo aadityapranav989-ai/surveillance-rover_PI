@@ -76,6 +76,20 @@ sudo systemctl restart rover-dashboard
 This first phase only displays the stream. It does not yet detect people or
 move the rover automatically.
 
+## Joystick navigation
+
+The dashboard uses a virtual joystick instead of directional buttons. Drag
+the stick away from the center to choose direction and speed:
+
+- Up: forward
+- Down: backward
+- Left/right: turn
+- Farther from center: faster movement
+
+The Pi sends short repeated movement pulses while the stick is held. Release
+the stick, move it to center, switch browser tabs, or press `STOP` to stop the
+ESP32. Test with the wheels lifted first.
+
 ## Run automatically with systemd
 
 Create the environment file:

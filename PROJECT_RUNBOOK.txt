@@ -209,6 +209,18 @@ service after changing this value:
 The dashboard currently displays the phone stream only. Person detection and
 autonomous movement will be added after the video stream is confirmed.
 
+Joystick navigation:
+
+  Up       = forward
+  Down     = backward
+  Left     = left turn
+  Right    = right turn
+
+The virtual joystick sends short repeated ESP32 motion pulses while held.
+Releasing the joystick, changing browser focus, or pressing STOP sends the
+stop command. Test with the wheels lifted before placing the rover on the
+ground.
+
 Install or refresh the systemd service:
 
   sudo cp /opt/raspberry-pi-rover/systemd/rover-dashboard.service /etc/systemd/system/
