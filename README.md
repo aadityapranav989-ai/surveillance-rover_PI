@@ -11,7 +11,8 @@ Laptop browser -> Raspberry Pi:8080 -> ESP32:80
                                       -> motors + GPS
 ```
 
-Both the Pi and ESP32 must be reachable from the same network. If the ESP32 is using its fallback access point, join the Pi to `ESP32-Robot` with password `robot123`; the ESP32 address is `192.168.4.1`. The laptop can join that same access point and browse to the Pi's address.
+The Pi and ESP32 must be reachable on the ESP32-hosted network. Join the Pi,
+laptop, and phone camera to `ESP32-Robot` with password `robot123`.
 
 The recommended operation is router-free: the ESP32 creates the `ESP32-Robot`
 access point at `192.168.4.1`. The Pi, laptop, and phone camera join that
@@ -21,7 +22,7 @@ Wi-Fi network directly.
 
 ```text
 ESP32 access point: 192.168.4.1
-Raspberry Pi:       192.168.4.2
+Raspberry Pi:       192.168.4.10
 Laptop:             DHCP address
 Phone camera:       DHCP address
 ```
@@ -38,13 +39,13 @@ nmcli connection show --active
 Replace `WIFI_CONNECTION_NAME` below with the Wi-Fi connection name:
 
 ```bash
-sudo nmcli connection modify "WIFI_CONNECTION_NAME" ipv4.method manual ipv4.addresses 192.168.4.2/24 ipv4.gateway 192.168.4.1 ipv4.dns 192.168.4.1
+sudo nmcli connection modify "WIFI_CONNECTION_NAME" ipv4.method manual ipv4.addresses 192.168.4.10/24 ipv4.gateway 192.168.4.1 ipv4.dns 192.168.4.1
 sudo nmcli connection down "WIFI_CONNECTION_NAME"
 sudo nmcli connection up "WIFI_CONNECTION_NAME"
 hostname -I
 ```
 
-Open the dashboard at `http://192.168.4.2:8080/`.
+Open the dashboard at `http://192.168.4.10:8080/`.
 
 ## Move this repository to the Pi
 
@@ -79,7 +80,7 @@ cd /opt/raspberry-pi-rover
 ESP32_URL=http://192.168.4.1 python3 app.py
 ```
 
-From the laptop, open `http://192.168.4.2:8080/` after joining
+From the laptop, open `http://192.168.4.10:8080/` after joining
 `ESP32-Robot`.
 
 To configure a different ESP32 address:
@@ -176,7 +177,8 @@ sudo ufw allow 8080/tcp
 
 ## ESP32 prerequisite
 
-The ESP32 repository must already be flashed with its Wi-Fi dashboard firmware. Set `WIFI_SSID` and `WIFI_PASSWORD` in its `src/config.h`, or use its fallback access point. The Pi gateway expects these endpoints:
+The ESP32 repository must already be flashed with its AP-only dashboard
+firmware. The Pi gateway expects these endpoints:
 
 - `GET /api/status`
 - `POST /api/command?direction=FORWARD&speed=120&value=20`

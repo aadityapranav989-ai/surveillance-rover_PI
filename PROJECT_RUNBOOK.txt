@@ -29,8 +29,8 @@ Current working network
 -----------------------
 Wi-Fi network: ESP32-Robot (ESP32 access point)
 ESP32 IP:     192.168.4.1
-Raspberry Pi: 192.168.4.2
-Pi dashboard: http://192.168.4.2:8080/
+Raspberry Pi: 192.168.4.10
+Pi dashboard: http://192.168.4.10:8080/
 ESP32 direct: http://192.168.4.1/
 ESP32 stable name after firmware update: http://esp32-rover.local/
 
@@ -79,7 +79,7 @@ and laptop:
 
 The ESP32 creates this network; no external router or phone hotspot is needed.
 
-The fallback access point is:
+The access point is:
 
   SSID:     ESP32-Robot
   Password: robot123
@@ -88,7 +88,7 @@ The fallback access point is:
 The ESP32 access point is the primary network. Connect the Pi, laptop, and
 phone camera to ESP32-Robot. The ESP32 address is fixed at 192.168.4.1.
 
-The Pi uses fixed address 192.168.4.2 on the ESP32 access-point network.
+The Pi uses fixed address 192.168.4.10 on the ESP32 access-point network.
 No router, DHCP reservation, or mDNS is required.
 
 PART 3 - BUILD, UPLOAD, AND FIND ESP32 IP
@@ -180,7 +180,7 @@ EOF
 Configure the Pi Wi-Fi connection with fixed address 192.168.4.2:
 
   nmcli connection show --active
-  sudo nmcli connection modify "WIFI_CONNECTION_NAME" ipv4.method manual ipv4.addresses 192.168.4.2/24 ipv4.gateway 192.168.4.1 ipv4.dns 192.168.4.1
+  sudo nmcli connection modify "WIFI_CONNECTION_NAME" ipv4.method manual ipv4.addresses 192.168.4.10/24 ipv4.gateway 192.168.4.1 ipv4.dns 192.168.4.1
   sudo nmcli connection down "WIFI_CONNECTION_NAME"
   sudo nmcli connection up "WIFI_CONNECTION_NAME"
   hostname -I
@@ -246,22 +246,21 @@ PART 6 - FIND PI IP AND OPEN DASHBOARD
 
 Preferred dashboard address from the laptop:
 
-  http://raspberrypi.local:8080/
+  http://192.168.4.10:8080/
 
 If mDNS does not resolve, find the numeric address on the Pi:
 
   hostname -I
 
-The current Pi address is 192.168.192.105. Use the first IPv4 address
-shown by hostname -I, not the IPv6 address.
+The fixed Pi address is 192.168.4.10.
 
 From the laptop browser, open:
 
-  http://PI_IP:8080/
+  http://192.168.4.10:8080/
 
 Current numeric dashboard:
 
-  http://192.168.192.105:8080/
+  http://192.168.4.10:8080/
 
 To keep that numeric address permanently, reserve the Pi's Wi-Fi MAC address
 in the router DHCP settings. Find the MAC and current network details:
@@ -270,9 +269,8 @@ in the router DHCP settings. Find the MAC and current network details:
   hostname -I
   ip route
 
-The current router is 192.168.192.156 and the current Pi address is
-192.168.192.105. Reserve 192.168.192.105 for the displayed wlan0 MAC. Do not
-choose a static address without checking for conflicts.
+The ESP32 access point is 192.168.4.1 and the Pi uses 192.168.4.10. Do not
+assign either address to another client.
 
 After saving the router reservation:
 
@@ -282,7 +280,7 @@ After saving the router reservation:
 
 The ESP32 direct dashboard is also available at:
 
-  http://192.168.192.131/
+  http://192.168.4.1/
 
 The Pi dashboard is preferred because it gives the laptop one stable entry
 point and routes commands through the Raspberry Pi.
@@ -294,8 +292,8 @@ Run these commands on the Pi.
 
 Test ESP32 connectivity:
 
-  ping -c 4 -W 2 192.168.192.131
-  curl --max-time 5 -v http://192.168.192.131/api/status
+  ping -c 4 -W 2 192.168.4.1
+  curl --max-time 5 -v http://192.168.4.1/api/status
 
 Test the Pi gateway locally:
 
@@ -352,16 +350,15 @@ PART 9 - TROUBLESHOOTING
 
 Symptom: curl to 192.168.4.1 hangs or times out
 
-Cause: the Pi is connected to the router network, while 192.168.4.1 is the
-ESP32 fallback AP network.
+Cause: the Pi is not connected to the ESP32 access point.
 
 Check the Pi network:
 
   ip route
   hostname -I
 
-If the Pi has an address such as 192.168.192.105, use the ESP32 router IP
-printed by the serial monitor, such as 192.168.192.131. Update:
+The Pi should have 192.168.4.10 and the ESP32 should have 192.168.4.1. Update
+the Pi Wi-Fi connection if needed:
 
   sudo nano /etc/default/rover-dashboard
   sudo systemctl restart rover-dashboard
@@ -373,8 +370,7 @@ Symptom: ESP32 unavailable from the Pi
   sudo systemctl status rover-dashboard
   journalctl -u rover-dashboard -n 50 --no-pager
 
-Confirm ESP32 and Pi are on the same subnet. For example, both should be
-192.168.192.x when using the router network.
+Confirm ESP32 and Pi are on the same subnet: 192.168.4.x.
 
 Symptom: dashboard opens but GPS says waiting for fix
 
