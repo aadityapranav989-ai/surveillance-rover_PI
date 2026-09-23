@@ -185,11 +185,13 @@ Under the video, choose a mode:
   2. An authorised card tapped on the reader within `AUTH_TIMEOUT` (10 s)
      shows `ACCESS GRANTED` and a green banner. Unknown faces are then
      allowed for `AUTH_GRANT_SECONDS` (2 minutes).
-  3. No authorised card in time: the dashboard raises the red **INTRUDER
-     DETECTED** alarm with repeated beeps, and the LCD shows `INTRUDER` /
-     `DETECTED`. Tapping
+  3. No authorised card in time: the dashboard raises the red **ACCESS DENIED
+     — INTRUDER DETECTED** alarm with repeated beeps, and the LCD shows
+     `INTRUDER` / `DETECTED`. Tapping
      an authorised card still cancels it.
-  4. An unregistered card shows `ACCESS DENIED` and changes nothing.
+  4. An unregistered card shows `ACCESS DENIED` on the LCD and a red
+     **ACCESS DENIED** banner on the dashboard for 5 seconds, and changes
+     nothing else.
 
   The check ends by itself if the unknown person leaves (no unknown face for
   `ALERT_CLEAR_AFTER`, 2 s). Enrolled faces are never challenged.
