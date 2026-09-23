@@ -53,10 +53,13 @@ hostname -I
 ```
 
 The video travels over the ESP32's Wi-Fi, which has limited bandwidth. The
-defaults (640x480, 10 fps, JPEG quality 70) use roughly 2-4 Mbit/s. If the
-stream stutters, lower `CAMERA_FPS` or `JPEG_QUALITY` on the Pi. Watch the
-annotated video on the laptop dashboard rather than opening the Pi's stream
-in extra browsers.
+Pi captures from the webcam in its compressed MJPG mode at up to 30 fps and
+queues at most about one frame per viewer (`STREAM_SEND_BUFFER`). When the
+Wi-Fi can't carry every frame, frames are skipped instead of queued, so the
+picture stays live (well under a second behind) rather than drifting
+seconds behind. For a smoother picture on a busy network, lower
+`JPEG_QUALITY` (for example 50) on the Pi. Watch the annotated video on the
+laptop dashboard rather than opening the Pi's stream in extra browsers.
 
 ## Raspberry Pi setup
 
@@ -82,8 +85,8 @@ ESP32_URL=http://192.168.4.1
 CAMERA_DEVICE=/dev/video0
 CAMERA_WIDTH=640
 CAMERA_HEIGHT=480
-CAMERA_FPS=10
-JPEG_QUALITY=70
+CAMERA_FPS=30
+JPEG_QUALITY=60
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF

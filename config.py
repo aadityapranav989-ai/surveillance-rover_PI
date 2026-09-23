@@ -36,11 +36,20 @@ CAMERA_DEVICE = os.getenv("CAMERA_DEVICE", "/dev/video0")
 CAMERA_SOURCE = CAMERA_STREAM_URL or CAMERA_DEVICE
 CAMERA_WIDTH = _int("CAMERA_WIDTH", 640)
 CAMERA_HEIGHT = _int("CAMERA_HEIGHT", 480)
-CAMERA_FPS = _int("CAMERA_FPS", 10)
+# Capture rate. The stream drops frames the Wi-Fi can't carry, so asking the
+# webcam for its full rate costs no latency.
+CAMERA_FPS = _int("CAMERA_FPS", 30)
+# MJPG is the webcam's compressed mode: most USB webcams only reach ~5 fps at
+# 640x480 in the uncompressed YUYV mode but 30 fps in MJPG. Set to YUYV if
+# your webcam has no MJPG mode.
+CAMERA_FOURCC = os.getenv("CAMERA_FOURCC", "MJPG").strip().upper()
 # Horizontal field of view of the webcam, used to turn the rover by the right
 # number of degrees towards a person. Most USB webcams are 55-70 degrees.
 CAMERA_HFOV_DEG = _float("CAMERA_HFOV_DEG", 60)
-JPEG_QUALITY = _int("JPEG_QUALITY", 70)
+JPEG_QUALITY = _int("JPEG_QUALITY", 60)
+# Bytes the Pi may queue per viewer before it starts skipping frames. Small
+# values keep the stream live on slow Wi-Fi; large values add seconds of lag.
+STREAM_SEND_BUFFER = _int("STREAM_SEND_BUFFER", 16384)
 
 # Vision.
 MODELS_DIR = os.getenv("MODELS_DIR", os.path.join(BASE_DIR, "models"))

@@ -2,6 +2,7 @@ import html
 import json
 import os
 import signal
+import socket
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -91,6 +92,11 @@ class RoverHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
+        # Keep at most about one frame queued for this viewer. When the Wi-Fi is
+        # slower than the camera, the write below blocks and the next loop sends
+        # the newest frame, so the picture stays live instead of falling behind.
+        self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, config.STREAM_SEND_BUFFER)
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         last_id = 0
         try:
             while True:
@@ -214,7 +220,7 @@ def start_vision(camera):
 
 def main():
     camera = Camera(config.CAMERA_SOURCE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT,
-                    config.CAMERA_FPS, config.JPEG_QUALITY)
+                    config.CAMERA_FPS, config.JPEG_QUALITY, config.CAMERA_FOURCC)
     RoverHandler.camera = camera
     if config.VISION_ENABLED:
         RoverHandler.vision, RoverHandler.follow = start_vision(camera)
