@@ -1,144 +1,244 @@
+import html
 import json
-import subprocess
+import os
+import signal
+import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.error import HTTPError, URLError
+from urllib.error import URLError
 from urllib.parse import parse_qs, urlencode, urlparse
-from urllib.request import Request, urlopen
 
-from config import CAMERA_DEVICE, CAMERA_FPS, CAMERA_HEIGHT, CAMERA_STREAM_URL, CAMERA_WIDTH, ESP32_URL, HOST, PORT, REQUEST_TIMEOUT
+import config
+import esp32
+from camera import Camera
+from follow import OPERATOR_STOP, FollowController, FollowSettings
 
-DASHBOARD = """<!doctype html>
-<html><head><meta name=viewport content='width=device-width,initial-scale=1'>
-<title>Raspberry Pi Rover</title><style>
-body{font-family:system-ui,sans-serif;max-width:680px;margin:auto;padding:20px;background:#17212b;color:#f5f7fa}
-h1{color:#55d6be}.status{padding:12px;background:#243442;border-radius:8px;margin:12px 0}
-.camera{width:100%;aspect-ratio:16/9;object-fit:cover;background:#0d141b;border-radius:8px;margin:12px 0}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:360px;margin:20px auto}
-.mode{display:flex;gap:8px;margin:16px 0}.mode button{min-height:42px;flex:1}
-.joystick{width:min(72vw,280px);aspect-ratio:1;margin:20px auto;background:#243442;border:2px solid #647484;border-radius:50%;position:relative;touch-action:none}
-.joystick:after{content:'';position:absolute;inset:18%;border:1px dashed #647484;border-radius:50%}
-.stick{position:absolute;width:76px;aspect-ratio:1;left:50%;top:50%;transform:translate(-50%,-50%);border:0;border-radius:50%;background:#2e8bdb;z-index:1}
-.stop{display:block;margin:12px auto;min-height:48px;padding:0 30px;border:0;border-radius:8px;background:#d94b4b;color:white;font-size:16px;font-weight:600}
-label{display:block;margin:10px 0 4px}
-input{width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #647484;background:#243442;color:white;font-size:16px}
-small{color:#b9c5cf}#gps{line-height:1.7}
-</style></head><body><h1>Raspberry Pi Rover</h1>
-<small>Pi gateway: ESP32_URL_PLACEHOLDER</small><div class=status id=gps>Loading GPS...</div>
-CAMERA_PANEL
-<label>Speed (0-255)</label><input id=speed type=number min=1 max=255 value=150>
-<div class=mode><button onclick="setMode('dpad')">D-pad</button><button onclick="setMode('joystick')">Joystick</button></div>
-<div id=dpad class=grid><span></span><button onclick="move('FORWARD',150,5)">Forward</button><span></span>
-<button onclick="move('LEFT',150,10)">Left</button><button class=stop onclick=stop()>STOP</button><button onclick="move('RIGHT',150,10)">Right</button>
-<span></span><button onclick="move('BACKWARD',150,5)">Backward</button><span></span></div>
-<div class=joystick id=joystick aria-label="Rover navigation joystick"><button class=stick id=stick aria-label="Joystick handle"></button></div>
-<button class=stop onclick=stop()>STOP</button>
-<script>
-async function stop(){await fetch('/api/stop',{method:'POST'});}
-const speedEl=document.querySelector('#speed'),joystick=document.querySelector('#joystick'),stick=document.querySelector('#stick');
-let active=false,joystickX=0,joystickY=0,joystickTimer;
-async function move(direction,speed,value){await fetch('/api/command?'+new URLSearchParams({direction,speed,value}),{method:'POST'});}
-function setMode(mode){stop();document.querySelector('#dpad').style.display=mode==='dpad'?'grid':'none';joystick.style.display=mode==='joystick'?'block':'none';}
-function commandFromJoystick(){const distance=Math.hypot(joystickX,joystickY);if(distance<0.12){stop();return;}const speed=Math.max(30,Math.min(255,Math.round(distance*255)));let direction,value;if(Math.abs(joystickX)>Math.abs(joystickY)){direction=joystickX<0?'LEFT':'RIGHT';value=10;}else{direction=joystickY<0?'FORWARD':'BACKWARD';value=5;}move(direction,Math.min(Number(speedEl.value),speed),value);}
-function updateJoystick(event){const bounds=joystick.getBoundingClientRect(),radius=bounds.width/2,limit=radius-40;let x=event.clientX-(bounds.left+radius),y=event.clientY-(bounds.top+radius),length=Math.hypot(x,y);if(length>limit){x=x*limit/length;y=y*limit/length;}joystickX=x/limit;joystickY=y/limit;stick.style.left=`${50+joystickX*40}%`;stick.style.top=`${50+joystickY*40}%`;commandFromJoystick();}
-function releaseJoystick(){active=false;clearInterval(joystickTimer);joystickX=0;joystickY=0;stick.style.left='50%';stick.style.top='50%';stop();}
-joystick.addEventListener('pointerdown',event=>{active=true;joystick.setPointerCapture(event.pointerId);updateJoystick(event);clearInterval(joystickTimer);joystickTimer=setInterval(()=>{if(active)commandFromJoystick();},120);});
-joystick.addEventListener('pointermove',event=>{if(active)updateJoystick(event);});
-joystick.addEventListener('pointerup',releaseJoystick);joystick.addEventListener('pointercancel',releaseJoystick);window.addEventListener('blur',releaseJoystick);
-setMode('joystick');
-async function refresh(){try{let d=await (await fetch('/api/status')).json();let g=d.gps;document.querySelector('#gps').innerHTML=g.fix?`GPS fix<br>Lat: ${g.latitude.toFixed(6)}<br>Lon: ${g.longitude.toFixed(6)}<br>Alt: ${g.altitude.toFixed(1)} m | Satellites: ${g.satellites}`:'Waiting for GPS fix';}catch(e){document.querySelector('#gps').textContent='ESP32 connection lost';}}
-setInterval(refresh,1000);refresh();
-</script></body></html>""".replace("ESP32_URL_PLACEHOLDER", ESP32_URL).replace("CAMERA_PANEL", "<img class=camera src='" + CAMERA_STREAM_URL + "' alt='Camera stream'>" if CAMERA_STREAM_URL else "<img class=camera src='/camera' alt='USB webcam stream'>")
+with open(os.path.join(config.BASE_DIR, "static", "dashboard.html"), encoding="utf-8") as dashboard_file:
+    DASHBOARD = dashboard_file.read().replace("{{ESP32_URL}}", html.escape(config.ESP32_URL)).encode()
 
 
-def esp32_request(path, method="GET"):
-    request = Request(ESP32_URL + path, method=method)
-    with urlopen(request, timeout=REQUEST_TIMEOUT) as response:
-        return response.status, response.read(), response.headers.get_content_type()
+class Autopilot:
+    """Operator-stop latch for follow-mode commands (source=auto) arriving from the laptop.
+
+    A STOP or manual drive command from any dashboard blocks follow-mode
+    commands until follow mode is started again, so the laptop cannot keep
+    driving after someone at the Pi dashboard has taken over.
+    """
+
+    def __init__(self):
+        self.blocked = False
+        self.last_command = 0.0
+        self._lock = threading.Lock()
+
+    def block(self):
+        with self._lock:
+            self.blocked = True
+
+    def resume(self):
+        with self._lock:
+            self.blocked = False
+
+    def allow_command(self):
+        with self._lock:
+            if self.blocked:
+                return False
+            self.last_command = time.monotonic()
+            return True
+
+    def status(self):
+        return {"blocked": self.blocked, "active": time.monotonic() - self.last_command < 2}
 
 
 class RoverHandler(BaseHTTPRequestHandler):
+    camera = None
+    vision = None  # None on the Pi gateway; vision runs on the laptop
+    follow = None
+    autopilot = Autopilot()
+
     def send_payload(self, status, payload, content_type="application/json"):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(payload)
 
+    def send_json(self, status, data):
+        self.send_payload(status, json.dumps(data).encode())
+
     def do_GET(self):
-        if self.path == "/":
-            payload = DASHBOARD.encode()
-            self.send_payload(200, payload, "text/html; charset=utf-8")
-            return
-        if self.path == "/api/status":
+        path = urlparse(self.path).path
+        if path == "/":
+            self.send_payload(200, DASHBOARD, "text/html; charset=utf-8")
+        elif path == "/api/status":
             self.proxy("/api/status", "GET")
-            return
-        if self.path == "/camera":
+        elif path == "/api/vision":
+            vision = self.vision
+            self.send_json(200, {
+                "camera": {"online": self.camera.online, "error": self.camera.error},
+                "vision": vision.status() if vision else None,
+                "follow": self.follow.status() if self.follow else None,
+                "known_faces": vision.database.summary() if vision and vision.database else [],
+                "autopilot": self.autopilot.status(),
+            })
+        elif path == "/camera":
             self.stream_camera()
-            return
-        self.send_payload(404, b'{"error":"not found"}')
+        else:
+            self.send_json(404, {"error": "not found"})
 
     def stream_camera(self):
-        command = [
-            "ffmpeg", "-loglevel", "error", "-f", "v4l2",
-            "-input_format", "yuyv422", "-video_size", f"{CAMERA_WIDTH}x{CAMERA_HEIGHT}",
-            "-framerate", CAMERA_FPS, "-i", CAMERA_DEVICE,
-            "-f", "mpjpeg", "-q:v", "6", "pipe:1",
-        ]
-        process = None
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        last_id = 0
         try:
-            process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            self.send_response(200)
-            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=ffmpeg")
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
             while True:
-                chunk = process.stdout.read(4096)
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
+                last_id, jpeg = self.camera.wait_jpeg(last_id, timeout=5)
+                if jpeg is None:
+                    continue
+                self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                                 + str(len(jpeg)).encode() + b"\r\n\r\n" + jpeg + b"\r\n")
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             pass
-        finally:
-            if process is not None:
-                process.terminate()
-                process.wait(timeout=2)
+
+    def stop_following(self, reason):
+        if self.follow is not None:
+            self.follow.disable(reason)
 
     def do_POST(self):
         parsed = urlparse(self.path)
+        values = parse_qs(parsed.query)
+
+        def param(name):
+            return values.get(name, [""])[0].strip()
+
+        automatic = param("source") == esp32.AUTO
         if parsed.path == "/api/stop":
+            if not automatic:
+                self.autopilot.block()
+                self.stop_following("stopped")
             self.proxy("/api/stop", "POST")
-            return
-        if parsed.path == "/api/command":
-            values = parse_qs(parsed.query)
-            direction = values.get("direction", [""])[0].upper()
+        elif parsed.path == "/api/command":
+            direction = param("direction").upper()
             try:
-                speed = int(values.get("speed", [""])[0])
-                value = float(values.get("value", [""])[0])
+                speed = int(param("speed"))
+                value = float(param("value"))
             except ValueError:
-                self.send_payload(400, b'{"error":"invalid speed or value"}')
+                self.send_json(400, {"error": "invalid speed or value"})
                 return
-            if direction not in {"FORWARD", "BACKWARD", "LEFT", "RIGHT"} or not 1 <= speed <= 255 or value <= 0:
-                self.send_payload(400, b'{"error":"invalid navigation command"}')
+            if direction not in esp32.DIRECTIONS or not 1 <= speed <= 255 or value <= 0:
+                self.send_json(400, {"error": "invalid navigation command"})
                 return
+            if automatic:
+                if not self.autopilot.allow_command():
+                    self.send_json(OPERATOR_STOP, {"error": "follow mode stopped by an operator"})
+                    return
+            else:
+                self.autopilot.block()
+                self.stop_following("manual control")
             self.proxy("/api/command?" + urlencode({"direction": direction, "speed": speed, "value": value}), "POST")
-            return
-        self.send_payload(404, b'{"error":"not found"}')
+        elif parsed.path == "/api/autopilot/resume":
+            self.autopilot.resume()
+            self.send_json(200, self.autopilot.status())
+        elif parsed.path.startswith(("/api/follow", "/api/faces")) and self.vision is None:
+            self.send_json(404, {"error": "vision runs on the laptop, not on this gateway"})
+        elif parsed.path == "/api/follow":
+            target = param("target")
+            known = {person["name"] for person in self.vision.database.summary()} if self.vision.database else set()
+            if target and target not in known:
+                self.send_json(400, {"error": f"unknown person '{target}'"})
+                return
+            self.follow.enable(target)
+            self.send_json(200, self.follow.status())
+        elif parsed.path == "/api/follow/stop":
+            self.follow.disable("off")
+            self.send_json(200, self.follow.status())
+        elif parsed.path == "/api/faces/enroll":
+            samples, error = self.vision.enroll(param("name"))
+            if error:
+                self.send_json(400, {"error": error})
+            else:
+                self.send_json(200, {"name": param("name"), "samples": samples})
+        elif parsed.path == "/api/faces/delete":
+            name = param("name")
+            if self.vision.database is None or not self.vision.database.delete(name):
+                self.send_json(404, {"error": f"unknown person '{name}'"})
+                return
+            if self.follow.target_name == name:
+                self.follow.disable("target deleted")
+            self.send_json(200, {"deleted": name})
+        else:
+            self.send_json(404, {"error": "not found"})
 
     def proxy(self, path, method):
         try:
-            status, payload, content_type = esp32_request(path, method)
+            status, payload, content_type = esp32.esp32_request(path, method)
             self.send_payload(status, payload, content_type)
-        except (HTTPError, URLError, TimeoutError, OSError) as error:
-            payload = json.dumps({"error": "ESP32 unavailable", "detail": str(error)}).encode()
-            self.send_payload(502, payload)
+        except (URLError, TimeoutError, OSError) as error:
+            self.send_json(502, {"error": "rover unavailable", "detail": str(error)})
 
     def log_message(self, format, *args):
+        # Dashboard polling, the camera stream and follow-mode pulses would flood the journal.
+        if self.path.startswith(("/api/status", "/api/vision", "/camera")) or "source=auto" in self.path:
+            return
         print("%s - %s" % (self.address_string(), format % args))
 
 
+def start_vision(camera):
+    # OpenCV models are only loaded where vision runs (the laptop).
+    from vision import Vision
+
+    vision = Vision(camera, config.MODELS_DIR, config.FACES_DIR, config.PERSON_CONFIDENCE,
+                    config.FACE_CONFIDENCE, config.FACE_MATCH_THRESHOLD, config.VISION_MAX_FPS)
+    camera.annotate = vision.annotate
+    follow = FollowController(vision, FollowSettings(
+        hfov_deg=config.CAMERA_HFOV_DEG,
+        min_speed=config.FOLLOW_MIN_SPEED,
+        max_speed=config.FOLLOW_MAX_SPEED,
+        turn_speed=config.FOLLOW_TURN_SPEED,
+        step_cm=config.FOLLOW_STEP_CM,
+        max_turn_deg=config.FOLLOW_MAX_TURN_DEG,
+        center_tolerance=config.FOLLOW_CENTER_TOLERANCE,
+        stop_body_height=config.FOLLOW_STOP_BODY_HEIGHT,
+        stop_face_height=config.FOLLOW_STOP_FACE_HEIGHT,
+        track_memory=config.FOLLOW_TRACK_MEMORY,
+        interval=config.FOLLOW_INTERVAL,
+    ))
+    vision.start()
+    follow.start()
+    print(f"Person detection: {vision.persons.backend}; face recognition: {'on' if vision.database else 'off'}")
+    return vision, follow
+
+
+def main():
+    camera = Camera(config.CAMERA_SOURCE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT,
+                    config.CAMERA_FPS, config.JPEG_QUALITY)
+    RoverHandler.camera = camera
+    if config.VISION_ENABLED:
+        RoverHandler.vision, RoverHandler.follow = start_vision(camera)
+    camera.start()
+
+    server = ThreadingHTTPServer((config.HOST, config.PORT), RoverHandler)
+    server.daemon_threads = True
+    role = "laptop vision" if config.VISION_ENABLED else "Pi gateway (vision off)"
+    print(f"Rover dashboard [{role}] listening on http://{config.HOST}:{config.PORT}")
+    print(f"Camera: {config.CAMERA_SOURCE}; forwarding commands to {config.ESP32_URL}")
+
+    def on_sigterm(*_):
+        raise KeyboardInterrupt
+
+    # systemd stops the service with SIGTERM; unwind so a following rover gets a stop command.
+    signal.signal(signal.SIGTERM, on_sigterm)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if RoverHandler.follow is not None:
+            RoverHandler.follow.disable("shutdown")
+
+
 if __name__ == "__main__":
-    server = ThreadingHTTPServer((HOST, PORT), RoverHandler)
-    print(f"Rover dashboard listening on http://{HOST}:{PORT}")
-    print(f"Forwarding commands to {ESP32_URL}")
-    server.serve_forever()
+    main()

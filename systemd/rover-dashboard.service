@@ -6,9 +6,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi
+SupplementaryGroups=video
 WorkingDirectory=/opt/raspberry-pi-rover
 EnvironmentFile=-/etc/default/rover-dashboard
-ExecStart=/usr/bin/python3 /opt/raspberry-pi-rover/app.py
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/raspberry-pi-rover/.venv/bin/python /opt/raspberry-pi-rover/app.py
 Restart=always
 RestartSec=3
 
