@@ -220,6 +220,7 @@ class Vision(threading.Thread):
             print("Vision: face models missing; run scripts/download_models.sh to enable face recognition")
         self.fps = 0.0
         self.target_box = None  # set by the follow controller, drawn on the stream
+        self.on_result = None  # called with each VisionResult, e.g. by the alert monitor
         self._latest = None
         self._lock = threading.Lock()
 
@@ -244,6 +245,8 @@ class Vision(threading.Thread):
                 continue
             with self._lock:
                 self._latest = result
+            if self.on_result is not None:
+                self.on_result(result)
             elapsed = time.monotonic() - started
             if elapsed < self.min_period:
                 time.sleep(self.min_period - elapsed)

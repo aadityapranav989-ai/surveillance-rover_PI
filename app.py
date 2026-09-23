@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import config
 import esp32
+from alerts import AlertMonitor
 from camera import Camera
 from follow import OPERATOR_STOP, FollowController, FollowSettings
 
@@ -55,6 +56,7 @@ class RoverHandler(BaseHTTPRequestHandler):
     camera = None
     vision = None  # None on the Pi gateway; vision runs on the laptop
     follow = None
+    alerts = None
     autopilot = Autopilot()
 
     def send_payload(self, status, payload, content_type="application/json"):
@@ -82,6 +84,7 @@ class RoverHandler(BaseHTTPRequestHandler):
                 "follow": self.follow.status() if self.follow else None,
                 "known_faces": vision.database.summary() if vision and vision.database else [],
                 "autopilot": self.autopilot.status(),
+                "alerts": self.alerts.status() if self.alerts else None,
             })
         elif path == "/camera":
             self.stream_camera()
@@ -149,8 +152,15 @@ class RoverHandler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/autopilot/resume":
             self.autopilot.resume()
             self.send_json(200, self.autopilot.status())
-        elif parsed.path.startswith(("/api/follow", "/api/faces")) and self.vision is None:
+        elif parsed.path.startswith(("/api/follow", "/api/faces", "/api/alerts")) and self.vision is None:
             self.send_json(404, {"error": "vision runs on the laptop, not on this gateway"})
+        elif parsed.path == "/api/alerts/mode":
+            try:
+                self.alerts.set_mode(param("mode").lower())
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
+                return
+            self.send_json(200, self.alerts.status())
         elif parsed.path == "/api/follow":
             target = param("target")
             known = {person["name"] for person in self.vision.database.summary()} if self.vision.database else set()
@@ -215,10 +225,13 @@ def start_vision(camera):
         track_memory=config.FOLLOW_TRACK_MEMORY,
         interval=config.FOLLOW_INTERVAL,
     ))
+    alerts = AlertMonitor(config.SETTINGS_FILE, config.ALERT_CLEAR_AFTER)
+    vision.on_result = alerts.update
     vision.start()
     follow.start()
     print(f"Person detection: {vision.persons.backend}; face recognition: {'on' if vision.database else 'off'}")
-    return vision, follow
+    print(f"Unknown-person alerts: {alerts.mode} mode")
+    return vision, follow, alerts
 
 
 def main():
@@ -226,7 +239,7 @@ def main():
                     config.CAMERA_FPS, config.JPEG_QUALITY, config.CAMERA_FOURCC)
     RoverHandler.camera = camera
     if config.VISION_ENABLED:
-        RoverHandler.vision, RoverHandler.follow = start_vision(camera)
+        RoverHandler.vision, RoverHandler.follow, RoverHandler.alerts = start_vision(camera)
     camera.start()
 
     server = ThreadingHTTPServer((config.HOST, config.PORT), RoverHandler)

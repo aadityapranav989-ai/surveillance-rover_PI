@@ -30,6 +30,11 @@ ul{list-style:none;padding:0}
 li{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#243442;border-radius:8px;margin:6px 0}
 li button{min-height:34px;padding:0 14px;background:#3b4d5e}
 .following{color:#ffd23f;font-weight:600}
+[hidden]{display:none!important}
+.alert{padding:14px;background:#7a1f1f;border:2px solid #ff5c5c;border-radius:8px;margin:12px 0;font-size:17px;line-height:1.5}
+.modes{display:flex;gap:8px;margin:8px 0}.modes button{flex:1;background:#3b4d5e}
+.modes button.active{background:#2e8bdb;outline:2px solid #55d6be}
+.modes button.active.detect{background:#d94b4b;outline-color:#ff9a9a}
 </style>
 </head>
 <body>
@@ -38,6 +43,15 @@ li button{min-height:34px;padding:0 14px;background:#3b4d5e}
 <div class="status" id="gps">Loading GPS...</div>
 <img class="camera" src="/camera" alt="Rover camera with detections">
 <div class="status" id="vision">Vision: starting...</div>
+
+<section id="alertControls" hidden>
+<div class="alert" id="alertBanner" role="alert" hidden><strong>&#9888; Unknown person detected</strong> <span id="alertWhen"></span></div>
+<div class="modes">
+  <button id="modeSafe">Safe mode (no alerts)</button>
+  <button id="modeDetect" class="detect">Detection mode (alert on unknown people)</button>
+</div>
+<small id="alertInfo"></small>
+</section>
 
 <section id="visionControls" hidden>
 <h2>Follow a person</h2>
@@ -216,11 +230,51 @@ function renderFaces(known) {
   select.value = known.some(p => p.name === selected) ? selected : '';
 }
 
+// Unknown-person alerts. Safe mode: no alerts. Detection mode: alert as soon as an
+// unrecognized face is seen. The mode is stored on the Pi and shared by every viewer.
+let lastAlertEvent = null, audio = null;
+document.addEventListener('pointerdown', () => {
+  // Browsers only allow sound after the viewer has clicked the page once.
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {}
+}, {once: true});
+function beep() {
+  if (!audio) return;
+  try {
+    const osc = audio.createOscillator(), gain = audio.createGain();
+    osc.frequency.value = 880; gain.gain.value = 0.15;
+    osc.connect(gain).connect(audio.destination);
+    osc.start(); osc.stop(audio.currentTime + 0.4);
+  } catch (e) {}
+}
+function renderAlerts(a) {
+  $('#alertControls').hidden = !a;
+  if (!a) return;
+  const detecting = a.mode === 'detection';
+  $('#modeSafe').classList.toggle('active', !detecting);
+  $('#modeDetect').classList.toggle('active', detecting);
+  // A new event number means a new unknown person appeared: sound once.
+  if (lastAlertEvent !== null && a.event > lastAlertEvent && a.active) beep();
+  lastAlertEvent = a.event;
+  $('#alertBanner').hidden = !(detecting && a.active);
+  if (detecting && a.active) {
+    $('#alertWhen').textContent = `· ${a.faces} unknown face${a.faces === 1 ? '' : 's'} in view`;
+  }
+  $('#alertInfo').textContent = detecting
+    ? (a.active ? '' : 'Watching for unknown people. Enrolled faces do not trigger alerts.')
+    : 'Safe mode: no alerts.';
+}
+function setAlertMode(mode) {
+  post('/api/alerts/mode?' + new URLSearchParams({mode})).catch(e => alert(e.message)).finally(refreshVision);
+}
+$('#modeSafe').addEventListener('click', () => setAlertMode('safe'));
+$('#modeDetect').addEventListener('click', () => setAlertMode('detection'));
+
 async function refreshVision() {
   try {
     const data = await (await fetch('/api/vision')).json();
     const v = data.vision;
     $('#visionControls').hidden = !v;
+    renderAlerts(data.alerts);
     if (!v) {
       // Pi gateway: vision and follow mode run on the laptop.
       const a = data.autopilot;
@@ -261,7 +315,7 @@ async function refreshGps() {
   }
 }
 setInterval(refreshGps, 1000); refreshGps();
-setInterval(refreshVision, 500); refreshVision();
+setInterval(refreshVision, 300); refreshVision();
 </script>
 </body>
 </html>

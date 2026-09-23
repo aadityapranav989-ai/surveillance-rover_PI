@@ -176,6 +176,23 @@ A face is accepted as a match when its similarity is at least
 `FACE_MATCH_THRESHOLD` (default `0.363`). Raise the threshold if the rover
 confuses people; lower it if an enrolled person shows as `unknown`.
 
+## Unknown-person alerts
+
+Under the video, choose a mode:
+
+- **Safe mode (no alerts)**: the default. Faces are still detected and
+  labelled, but nothing alerts.
+- **Detection mode**: as soon as a face that is not enrolled appears (on the
+  next vision result, about 0.2 s), the dashboard shows a red
+  "Unknown person detected" banner and beeps once. The banner stays while the
+  person is in view and clears `ALERT_CLEAR_AFTER` seconds (default 2) after
+  they leave. Enrolled faces never trigger alerts.
+
+The mode is shared by everyone viewing the dashboard and is saved in
+`settings.json`, so it survives restarts. Browsers only play the beep after
+you have clicked somewhere on the page once. Alerts need a visible face: a
+person facing away from the camera is detected as a body but not identified.
+
 ## Follow mode (laptop)
 
 On the laptop dashboard under **Follow a person**, choose a target and press
@@ -275,6 +292,7 @@ Laptop only:
 | POST | `/api/follow/stop` | End follow mode |
 | POST | `/api/faces/enroll?name=NAME` | Enroll the single face in view |
 | POST | `/api/faces/delete?name=NAME` | Delete an enrolled person |
+| POST | `/api/alerts/mode?mode=safe\|detection` | Switch unknown-person alerts off or on |
 
 For moves, `value` is centimeters for FORWARD/BACKWARD and degrees for
 LEFT/RIGHT. When the ESP32 rejects a command, its status code and body are

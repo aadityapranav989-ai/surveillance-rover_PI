@@ -64,6 +64,12 @@ FACE_CONFIDENCE = _float("FACE_CONFIDENCE", 0.8)
 # threshold published with the SFace model; raise it to reduce false matches.
 FACE_MATCH_THRESHOLD = _float("FACE_MATCH_THRESHOLD", 0.363)
 
+# Unknown-person alerts (detection mode): an alert starts on the first
+# unrecognized face and clears once none has been seen for this many seconds.
+ALERT_CLEAR_AFTER = _float("ALERT_CLEAR_AFTER", 2)
+# Remembers the alert mode (safe/detection) across restarts.
+SETTINGS_FILE = os.getenv("SETTINGS_FILE", os.path.join(BASE_DIR, "settings.json"))
+
 # Follow mode.
 FOLLOW_INTERVAL = _float("FOLLOW_INTERVAL", 0.3)
 FOLLOW_MIN_SPEED = _int("FOLLOW_MIN_SPEED", 90)
