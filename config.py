@@ -43,9 +43,6 @@ CAMERA_FPS = _int("CAMERA_FPS", 30)
 # 640x480 in the uncompressed YUYV mode but 30 fps in MJPG. Set to YUYV if
 # your webcam has no MJPG mode.
 CAMERA_FOURCC = os.getenv("CAMERA_FOURCC", "MJPG").strip().upper()
-# Horizontal field of view of the webcam, used to turn the rover by the right
-# number of degrees towards a person. Most USB webcams are 55-70 degrees.
-CAMERA_HFOV_DEG = _float("CAMERA_HFOV_DEG", 60)
 JPEG_QUALITY = _int("JPEG_QUALITY", 60)
 # Bytes the Pi may queue per viewer before it starts skipping frames. Small
 # values keep the stream live on slow Wi-Fi; large values add seconds of lag.
@@ -70,21 +67,32 @@ ALERT_CLEAR_AFTER = _float("ALERT_CLEAR_AFTER", 2)
 # Remembers the alert mode (safe/detection) across restarts.
 SETTINGS_FILE = os.getenv("SETTINGS_FILE", os.path.join(BASE_DIR, "settings.json"))
 
-# Follow mode.
-FOLLOW_INTERVAL = _float("FOLLOW_INTERVAL", 0.3)
+# Follow mode. The ESP32 runs each command for 15.3 ms per cm or 11.4 ms per
+# degree, so the step lengths below (about 0.6 s each) outlast the command
+# interval and the rover moves continuously instead of stop-start. If the Pi
+# stops sending, the rover still halts within one step.
+FOLLOW_INTERVAL = _float("FOLLOW_INTERVAL", 0.25)
 FOLLOW_MIN_SPEED = _int("FOLLOW_MIN_SPEED", 90)
 FOLLOW_MAX_SPEED = _int("FOLLOW_MAX_SPEED", 150)
-FOLLOW_TURN_SPEED = _int("FOLLOW_TURN_SPEED", 110)
-# 20 cm is ~306 ms on the ESP32, just longer than FOLLOW_INTERVAL, so the
-# rover drives smoothly instead of stop-start.
-FOLLOW_STEP_CM = _float("FOLLOW_STEP_CM", 20)
-FOLLOW_MAX_TURN_DEG = _float("FOLLOW_MAX_TURN_DEG", 25)
-# Person must be within this fraction of the frame width from center before
-# the rover drives forward instead of turning.
-FOLLOW_CENTER_TOLERANCE = _float("FOLLOW_CENTER_TOLERANCE", 0.12)
-# Stop approaching once the target fills this fraction of the frame height.
+FOLLOW_TURN_MIN_SPEED = _int("FOLLOW_TURN_MIN_SPEED", 85)
+FOLLOW_TURN_MAX_SPEED = _int("FOLLOW_TURN_MAX_SPEED", 130)
+FOLLOW_STEP_CM = _float("FOLLOW_STEP_CM", 40)
+FOLLOW_TURN_STEP_DEG = _float("FOLLOW_TURN_STEP_DEG", 50)
+# Start turning when the person is this far off-center (fraction of the frame
+# width), and keep turning until they are back within FOLLOW_CENTER_EXIT.
+FOLLOW_CENTER_ENTER = _float("FOLLOW_CENTER_ENTER", 0.15)
+FOLLOW_CENTER_EXIT = _float("FOLLOW_CENTER_EXIT", 0.06)
+# Stop approaching once the target fills this fraction of the frame height,
+# and drive again once it has shrunk by FOLLOW_RESUME_MARGIN of that.
 FOLLOW_STOP_BODY_HEIGHT = _float("FOLLOW_STOP_BODY_HEIGHT", 0.8)
 FOLLOW_STOP_FACE_HEIGHT = _float("FOLLOW_STOP_FACE_HEIGHT", 0.25)
+FOLLOW_RESUME_MARGIN = _float("FOLLOW_RESUME_MARGIN", 0.12)
+# Weight of each new detection when smoothing the target position (0..1).
+FOLLOW_SMOOTHING = _float("FOLLOW_SMOOTHING", 0.5)
+# Largest speed change between consecutive commands, so the rover eases in and out.
+FOLLOW_MAX_SPEED_CHANGE = _int("FOLLOW_MAX_SPEED_CHANGE", 20)
+# Keep going this long when the person is briefly not detected.
+FOLLOW_LOST_GRACE = _float("FOLLOW_LOST_GRACE", 0.8)
 # Keep tracking a recognized person's body for this long after their face
 # was last recognized (for example when they turn away).
 FOLLOW_TRACK_MEMORY = _float("FOLLOW_TRACK_MEMORY", 3)

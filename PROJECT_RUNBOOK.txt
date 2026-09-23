@@ -308,12 +308,12 @@ faces in blue with their name, unknown faces in red, and the follow target in
 yellow. If it shows "hog" as the body detector or face recognition "off", run
 scripts\download_models.py again.
 
-Set CAMERA_HFOV_DEG (the rover webcam's horizontal field of view, default 60)
-and follow tuning such as FOLLOW_MAX_SPEED as environment variables in the
+Set follow tuning such as FOLLOW_MAX_SPEED as environment variables in the
 same PowerShell window before running the script, for example:
 
-  $env:CAMERA_HFOV_DEG = "65"
   $env:FOLLOW_MAX_SPEED = "120"
+
+All follow settings are listed and explained in config.py.
 
 Enroll faces:
 

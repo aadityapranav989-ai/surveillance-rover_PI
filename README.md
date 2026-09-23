@@ -153,10 +153,6 @@ VISION_ENABLED=1 ESP32_URL=http://192.168.4.10:8080 CAMERA_STREAM_URL=http://192
   ROVER_HOST=127.0.0.1 ROVER_PORT=8090 .venv/bin/python app.py
 ```
 
-Set `CAMERA_HFOV_DEG` on the laptop to the rover webcam's horizontal field
-of view (default 60). Follow mode uses it to turn the right number of degrees
-towards a person.
-
 ## Face enrollment (laptop)
 
 Face recognition identifies people enrolled on the laptop. To enroll someone:
@@ -193,10 +189,10 @@ The mode is shared by everyone viewing the dashboard and is saved in
 you have clicked somewhere on the page once. Alerts need a visible face: a
 person facing away from the camera is detected as a body but not identified.
 
-## Follow mode (laptop)
+## Follow mode
 
-On the laptop dashboard under **Follow a person**, choose a target and press
-**Start following**:
+On the dashboard (the Pi's, or the laptop's when vision runs there) under
+**Follow target**, choose a target and press **Start following**:
 
 - **Anyone**: follows the closest (largest) detected person and sticks with
   that person while they stay in view.
@@ -205,16 +201,27 @@ On the laptop dashboard under **Follow a person**, choose a target and press
   `FOLLOW_TRACK_MEMORY` seconds if the person turns away. If only the face is
   visible, it steers towards the face.
 
-Every `FOLLOW_INTERVAL` seconds the laptop sends one command through the Pi:
+Every `FOLLOW_INTERVAL` (0.25 s) one command is sent. Each command runs for
+about 0.6 s (`FOLLOW_STEP_CM`, `FOLLOW_TURN_STEP_DEG`), so the next one
+arrives before it ends and the rover moves continuously instead of
+stop-start:
 
-- Target off-center: turn `LEFT`/`RIGHT` by the target's angle from the
-  center of the image, up to `FOLLOW_MAX_TURN_DEG` degrees.
-- Target centered and far away: `FORWARD` by `FOLLOW_STEP_CM`. The rover moves
-  faster when the person is farther away (`FOLLOW_MIN_SPEED` to
-  `FOLLOW_MAX_SPEED`).
+- Target off-center (beyond `FOLLOW_CENTER_ENTER`): turn `LEFT`/`RIGHT`,
+  faster the further off-center it is (`FOLLOW_TURN_MIN_SPEED` to
+  `FOLLOW_TURN_MAX_SPEED`), until it is back within `FOLLOW_CENTER_EXIT`.
+- Target centered: drive `FORWARD`, faster when the person is farther away
+  (`FOLLOW_MIN_SPEED` to `FOLLOW_MAX_SPEED`).
 - Target fills `FOLLOW_STOP_BODY_HEIGHT` of the frame height: stop (close
-  enough).
-- Target lost, or the camera stream freezes: stop and wait.
+  enough). It drives again once the person has moved away by
+  `FOLLOW_RESUME_MARGIN`, so it does not creep back and forth.
+- Target not detected for a moment: keep going for up to
+  `FOLLOW_LOST_GRACE` (0.8 s) instead of stopping on every missed frame.
+  Lost for longer, or the camera stream freezes: stop and wait.
+
+To keep this smooth, the target's position is averaged across frames
+(`FOLLOW_SMOOTHING`) and the speed changes by at most
+`FOLLOW_MAX_SPEED_CHANGE` per command. The ESP32 drives straight or turns on
+the spot, so the rover turns until the person is centered, then drives.
 
 Stopping follow mode:
 
@@ -223,8 +230,7 @@ Stopping follow mode:
   started again from the laptop. The laptop dashboard shows "stopped from the
   Pi dashboard".
 - If the laptop crashes or leaves Wi-Fi, no new commands arrive. The rover
-  finishes its last short step (at most `FOLLOW_STEP_CM` or
-  `FOLLOW_MAX_TURN_DEG`) and stops.
+  finishes its last step (about 0.6 s) and stops.
 
 Test with the wheels lifted first, then in an open area at a low
 `FOLLOW_MAX_SPEED`. The ESP32 watchdog remains the last line of defense.

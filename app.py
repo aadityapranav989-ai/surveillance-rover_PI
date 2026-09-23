@@ -213,15 +213,20 @@ def start_vision(camera):
                     config.FACE_CONFIDENCE, config.FACE_MATCH_THRESHOLD, config.VISION_MAX_FPS)
     camera.annotate = vision.annotate
     follow = FollowController(vision, FollowSettings(
-        hfov_deg=config.CAMERA_HFOV_DEG,
         min_speed=config.FOLLOW_MIN_SPEED,
         max_speed=config.FOLLOW_MAX_SPEED,
-        turn_speed=config.FOLLOW_TURN_SPEED,
+        turn_min_speed=config.FOLLOW_TURN_MIN_SPEED,
+        turn_max_speed=config.FOLLOW_TURN_MAX_SPEED,
         step_cm=config.FOLLOW_STEP_CM,
-        max_turn_deg=config.FOLLOW_MAX_TURN_DEG,
-        center_tolerance=config.FOLLOW_CENTER_TOLERANCE,
+        turn_step_deg=config.FOLLOW_TURN_STEP_DEG,
+        center_enter=config.FOLLOW_CENTER_ENTER,
+        center_exit=config.FOLLOW_CENTER_EXIT,
         stop_body_height=config.FOLLOW_STOP_BODY_HEIGHT,
         stop_face_height=config.FOLLOW_STOP_FACE_HEIGHT,
+        resume_margin=config.FOLLOW_RESUME_MARGIN,
+        smoothing=config.FOLLOW_SMOOTHING,
+        max_speed_change=config.FOLLOW_MAX_SPEED_CHANGE,
+        lost_grace=config.FOLLOW_LOST_GRACE,
         track_memory=config.FOLLOW_TRACK_MEMORY,
         interval=config.FOLLOW_INTERVAL,
     ))
