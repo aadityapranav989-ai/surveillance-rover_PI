@@ -52,6 +52,48 @@ class Autopilot:
         return {"blocked": self.blocked, "active": time.monotonic() - self.last_command < 2}
 
 
+class LCDStatusPublisher(threading.Thread):
+    def __init__(self, vision, follow, alerts):
+        super().__init__(daemon=True, name="lcd-status")
+        self.vision = vision
+        self.follow = follow
+        self.alerts = alerts
+
+    def status(self):
+        alert = self.alerts.status()
+        if alert["active"]:
+            return "INTRUDER", f'{alert["faces"]} UNKNOWN'
+
+        follow = self.follow.status()
+        target = follow["target"] or "ANYONE"
+        if follow["enabled"]:
+            state = follow["state"]
+            if state == "searching":
+                return "SEARCHING", target
+            if state.startswith("tracking"):
+                return "CHASING", target
+            if state == "reached target":
+                return "TARGET FOUND", target
+            return "FOLLOWING", target
+
+        result = self.vision.latest
+        if result is not None:
+            names = [person.name for person in result.persons if person.name]
+            if names:
+                return "IDENTIFIED", names[0]
+            if result.persons:
+                return "PERSON DETECTED", f'{len(result.persons)} IN VIEW'
+        return "WATCHING", "NO PERSON"
+
+    def run(self):
+        while True:
+            try:
+                esp32.send_lcd_status(*self.status())
+            except (URLError, OSError):
+                pass
+            time.sleep(0.5)
+
+
 class RoverHandler(BaseHTTPRequestHandler):
     camera = None
     vision = None  # None on the Pi gateway; vision runs on the laptop
@@ -125,7 +167,13 @@ class RoverHandler(BaseHTTPRequestHandler):
             return values.get(name, [""])[0].strip()
 
         automatic = param("source") == esp32.AUTO
-        if parsed.path == "/api/stop":
+        if parsed.path == "/api/lcd/status":
+            state, detail = param("state"), param("detail")
+            if not state or not detail:
+                self.send_json(400, {"error": "state and detail are required"})
+                return
+            self.proxy("/api/lcd/status?" + urlencode({"state": state, "detail": detail}), "POST")
+        elif parsed.path == "/api/stop":
             if not automatic:
                 self.autopilot.block()
                 self.stop_following("stopped")
@@ -266,6 +314,7 @@ def main():
     RoverHandler.camera = camera
     if config.VISION_ENABLED:
         RoverHandler.vision, RoverHandler.follow, RoverHandler.alerts = start_vision(camera)
+        LCDStatusPublisher(RoverHandler.vision, RoverHandler.follow, RoverHandler.alerts).start()
     camera.start()
 
     server = ThreadingHTTPServer((config.HOST, config.PORT), RoverHandler)
