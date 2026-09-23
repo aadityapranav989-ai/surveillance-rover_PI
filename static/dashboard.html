@@ -93,8 +93,10 @@ li button{min-height:34px;padding:0 14px;background:#3b4d5e}
 <script>
 const $ = selector => document.querySelector(selector);
 const speedEl = $('#speed'), joystick = $('#joystick'), stick = $('#stick');
-// FORWARD/BACKWARD value is centimeters, LEFT/RIGHT value is degrees.
-const STEP = {FORWARD: 5, BACKWARD: 5, LEFT: 10, RIGHT: 10};
+// FORWARD/BACKWARD value is centimeters, LEFT/RIGHT value is degrees. The ESP32
+// runs 15.3 ms per cm and 11.4 ms per degree, so each step (~180 ms) outlasts the
+// 150 ms joystick tick and held movement is continuous.
+const STEP = {FORWARD: 12, BACKWARD: 12, LEFT: 15, RIGHT: 15};
 
 function speedLimit() { return Math.max(1, Math.min(255, Number(speedEl.value) || 150)); }
 
