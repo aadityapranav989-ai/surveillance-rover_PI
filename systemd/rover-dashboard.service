@@ -1,0 +1,16 @@
+[Unit]
+Description=Raspberry Pi ESP32 Rover Dashboard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/raspberry-pi-rover
+EnvironmentFile=-/etc/default/rover-dashboard
+ExecStart=/usr/bin/python3 /opt/raspberry-pi-rover/app.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
