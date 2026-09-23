@@ -194,9 +194,11 @@ class RoverHandler(BaseHTTPRequestHandler):
 
 
 def start_vision(camera):
-    # OpenCV models are only loaded where vision runs (the laptop).
+    # OpenCV models are only loaded where vision runs.
+    import cv2
     from vision import Vision
 
+    cv2.setNumThreads(config.VISION_THREADS)
     vision = Vision(camera, config.MODELS_DIR, config.FACES_DIR, config.PERSON_CONFIDENCE,
                     config.FACE_CONFIDENCE, config.FACE_MATCH_THRESHOLD, config.VISION_MAX_FPS)
     camera.annotate = vision.annotate

@@ -55,6 +55,9 @@ STREAM_SEND_BUFFER = _int("STREAM_SEND_BUFFER", 16384)
 MODELS_DIR = os.getenv("MODELS_DIR", os.path.join(BASE_DIR, "models"))
 FACES_DIR = os.getenv("FACES_DIR", os.path.join(BASE_DIR, "faces"))
 VISION_MAX_FPS = _float("VISION_MAX_FPS", 8)
+# CPU cores OpenCV may use for detection. Left unset, detection grabs every
+# core and the camera thread waits, dropping the stream below 30 fps on a Pi.
+VISION_THREADS = _int("VISION_THREADS", 2)
 PERSON_CONFIDENCE = _float("PERSON_CONFIDENCE", 0.5)
 FACE_CONFIDENCE = _float("FACE_CONFIDENCE", 0.8)
 # Cosine similarity needed to accept a face as a known person. 0.363 is the
