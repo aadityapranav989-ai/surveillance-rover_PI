@@ -46,7 +46,8 @@ def lcd_lines(alerts, rfid, follow, vision, camera_online, known_names=()):
         return "ADD CARD", f"Tap card: {enrolling['seconds_left']}s"
     if a["mode"] == DETECTION:
         if a["state"] == ALARM:
-            return "!! INTRUDER !!", "Alert sent"
+            # "INTRUDER DETECTED" is 17 characters, so it spans both lines, centered.
+            return "INTRUDER".center(16), "DETECTED".center(16)
         if a["state"] == CHECKING:
             return "UNKNOWN PERSON", f"Tap card: {a['seconds_left']}s"
     if known_names:

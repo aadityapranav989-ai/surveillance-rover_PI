@@ -49,7 +49,7 @@ class LcdLinesTest(unittest.TestCase):
         self.now += 3
         self.assertEqual(self.lines(), ("UNKNOWN PERSON", "Tap card: 7s"))
         self.now += 8
-        self.assertEqual(self.lines(), ("!! INTRUDER !!", "Alert sent"))
+        self.assertEqual(self.lines(), ("    INTRUDER    ", "    DETECTED    "))
 
     def test_card_taps_show_briefly(self):
         granted = FakeRfid(last_tap={"name": "Asha", "authorised": True, "enrolled": False, "age": 1.0})
@@ -78,7 +78,7 @@ class LcdLinesTest(unittest.TestCase):
         self.alerts.update(VisionResult(1, 0, 640, 480, [], [Detection((0, 0, 40, 40), 0.9)]))
         self.assertEqual(self.lines(known=["Asha"])[0], "UNKNOWN PERSON")
         self.now += 11
-        self.assertEqual(self.lines(known=["Asha"])[0], "!! INTRUDER !!")
+        self.assertEqual(self.lines(known=["Asha"])[0].strip(), "INTRUDER")
         tap = FakeRfid(last_tap={"name": "Asha", "authorised": True, "enrolled": False, "age": 1.0})
         self.assertEqual(self.lines(rfid=tap, known=["Asha"])[0], "ACCESS GRANTED")
 

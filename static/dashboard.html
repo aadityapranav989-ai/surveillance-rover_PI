@@ -425,7 +425,7 @@ function renderAlerts(a) {
   banner.className = 'alert' + (state === 'checking' ? ' warn' : state === 'granted' ? ' ok' : '');
   $('#alertCountdown').hidden = state !== 'checking';
   if (state === 'alarm') {
-    $('#alertTitle').textContent = '\u26A0 INTRUDER \u2014 NO AUTHORISATION';
+    $('#alertTitle').textContent = '\u26A0 INTRUDER DETECTED \u2014 NO RFID CARD';
     $('#alertWhen').textContent = `\u00B7 ${faces}`;
   } else if (state === 'checking') {
     $('#alertTitle').textContent = '\u26A0 UNKNOWN PERSON \u2014 TAP RFID CARD';

@@ -185,8 +185,9 @@ Under the video, choose a mode:
   2. An authorised card tapped on the reader within `AUTH_TIMEOUT` (10 s)
      shows `ACCESS GRANTED` and a green banner. Unknown faces are then
      allowed for `AUTH_GRANT_SECONDS` (2 minutes).
-  3. No authorised card in time: the dashboard raises the red **INTRUDER**
-     alarm with repeated beeps, and the LCD shows `!! INTRUDER !!`. Tapping
+  3. No authorised card in time: the dashboard raises the red **INTRUDER
+     DETECTED** alarm with repeated beeps, and the LCD shows `INTRUDER` /
+     `DETECTED`. Tapping
      an authorised card still cancels it.
   4. An unregistered card shows `ACCESS DENIED` and changes nothing.
 
@@ -245,7 +246,8 @@ set `RFID_ENABLED=0` to turn it off.
 The LCD with an I2C backpack connects to the ESP32 (wiring in the ESP32
 repository's README). The Pi sends it the current status twice a second
 when it changes: `SAFE MODE`, `DETECTION MODE`, `UNKNOWN PERSON` with the
-countdown, `ACCESS GRANTED`, `!! INTRUDER !!`, `FOLLOWING`, and so on. If
+countdown, `ACCESS GRANTED`, `INTRUDER DETECTED`, `WELCOME` with the name of a
+recognized person, `FOLLOWING`, and so on. If
 the Pi stops sending for 10 seconds, the ESP32 shows its own status instead
 of a stale message. Set `LCD_ENABLED=0` to stop the Pi sending.
 
