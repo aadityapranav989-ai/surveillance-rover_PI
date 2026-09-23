@@ -13,7 +13,44 @@ Laptop browser -> Raspberry Pi:8080 -> ESP32:80
 
 Both the Pi and ESP32 must be reachable from the same network. If the ESP32 is using its fallback access point, join the Pi to `ESP32-Robot` with password `robot123`; the ESP32 address is `192.168.4.1`. The laptop can join that same access point and browse to the Pi's address.
 
-For normal operation, set Wi-Fi credentials in the ESP32 `src/config.h` and connect the Pi and laptop to that shared router. Find the Pi address with `hostname -I`.
+For normal operation, set Wi-Fi credentials in the ESP32 `src/config.h` and connect the Pi and laptop to that shared router. Use `http://raspberrypi.local:8080/` for the Pi dashboard instead of depending on its changing numeric IP.
+
+## Keep the Pi address stable
+
+The Pi's mDNS hostname is:
+
+```text
+raspberrypi.local
+```
+
+Open the dashboard from the laptop at:
+
+```text
+http://raspberrypi.local:8080/
+```
+
+For a stable numeric address as well, create a DHCP reservation in the
+router. Find the Pi MAC address:
+
+```bash
+cat /sys/class/net/wlan0/address
+hostname -I
+ip route
+```
+
+In the router's DHCP/LAN settings, reserve the current Pi MAC address at
+`192.168.192.105`. The router currently appears to be `192.168.192.156`.
+Do not configure a random static address that might already belong to another
+device. After saving the reservation, renew the Pi lease:
+
+```bash
+sudo nmcli connection show --active
+sudo nmcli device reapply wlan0
+hostname -I
+```
+
+If the router does not support reservations, keep using
+`http://raspberrypi.local:8080/`.
 
 ## Move this repository to the Pi
 

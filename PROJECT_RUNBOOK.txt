@@ -30,7 +30,7 @@ Current working network
 Wi-Fi network: KOLFER
 ESP32 IP:     192.168.192.131
 Raspberry Pi: 192.168.192.105
-Pi dashboard: http://192.168.192.105:8080/
+Pi dashboard: http://raspberrypi.local:8080/
 ESP32 direct: http://192.168.192.131/
 ESP32 stable name after firmware update: http://esp32-rover.local/
 
@@ -91,6 +91,8 @@ to connect all three devices to the same router Wi-Fi network.
 
 The ESP32 firmware advertises the stable mDNS name esp32-rover.local. Use
 this name instead of the changing DHCP address when configuring the Pi.
+The Pi also advertises raspberrypi.local through Avahi. Use
+http://raspberrypi.local:8080/ instead of its changing DHCP address.
 
 PART 3 - BUILD, UPLOAD, AND FIND ESP32 IP
 ==========================================
@@ -250,7 +252,11 @@ Expected shape:
 PART 6 - FIND PI IP AND OPEN DASHBOARD
 ======================================
 
-On the Pi:
+Preferred dashboard address from the laptop:
+
+  http://raspberrypi.local:8080/
+
+If mDNS does not resolve, find the numeric address on the Pi:
 
   hostname -I
 
@@ -261,9 +267,26 @@ From the laptop browser, open:
 
   http://PI_IP:8080/
 
-Current dashboard:
+Current numeric dashboard:
 
   http://192.168.192.105:8080/
+
+To keep that numeric address permanently, reserve the Pi's Wi-Fi MAC address
+in the router DHCP settings. Find the MAC and current network details:
+
+  cat /sys/class/net/wlan0/address
+  hostname -I
+  ip route
+
+The current router is 192.168.192.156 and the current Pi address is
+192.168.192.105. Reserve 192.168.192.105 for the displayed wlan0 MAC. Do not
+choose a static address without checking for conflicts.
+
+After saving the router reservation:
+
+  sudo nmcli connection show --active
+  sudo nmcli device reapply wlan0
+  hostname -I
 
 The ESP32 direct dashboard is also available at:
 
