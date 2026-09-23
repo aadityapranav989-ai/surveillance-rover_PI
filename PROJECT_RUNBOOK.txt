@@ -27,14 +27,14 @@ The Raspberry Pi hosts the dashboard and forwards commands to the ESP32.
 
 Current working network
 -----------------------
-Wi-Fi network: KOLFER
-ESP32 IP:     192.168.192.131
-Raspberry Pi: 192.168.192.105
-Pi dashboard: http://raspberrypi.local:8080/
-ESP32 direct: http://192.168.192.131/
+Wi-Fi network: ESP32-Robot (ESP32 access point)
+ESP32 IP:     192.168.4.1
+Raspberry Pi: 192.168.4.2
+Pi dashboard: http://192.168.4.2:8080/
+ESP32 direct: http://192.168.4.1/
 ESP32 stable name after firmware update: http://esp32-rover.local/
 
-IP addresses can change. Always verify them before starting a session.
+The ESP32 and Pi addresses are fixed in the router-free setup.
 Never commit Wi-Fi passwords or private credentials to Git.
 
 PART 1 - ESP32 HARDWARE AND WIRING
@@ -74,11 +74,10 @@ PowerShell on the development computer:
 Edit src/config.h and set the Wi-Fi network shared by the ESP32, Pi,
 and laptop:
 
-  const char *const WIFI_SSID = "YOUR_WIFI_NAME";
-  const char *const WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+  const char *const WIFI_AP_SSID = "ESP32-Robot";
+  const char *const WIFI_AP_PASSWORD = "robot123";
 
-The current working network is KOLFER. Do not place the real password in
-this runbook or commit it to Git.
+The ESP32 creates this network; no external router or phone hotspot is needed.
 
 The fallback access point is:
 
@@ -86,13 +85,11 @@ The fallback access point is:
   Password: robot123
   ESP32 IP: 192.168.4.1
 
-The fallback AP is useful for direct testing, but the recommended setup is
-to connect all three devices to the same router Wi-Fi network.
+The ESP32 access point is the primary network. Connect the Pi, laptop, and
+phone camera to ESP32-Robot. The ESP32 address is fixed at 192.168.4.1.
 
-The ESP32 firmware advertises the stable mDNS name esp32-rover.local. Use
-this name instead of the changing DHCP address when configuring the Pi.
-The Pi also advertises raspberrypi.local through Avahi. Use
-http://raspberrypi.local:8080/ instead of its changing DHCP address.
+The Pi uses fixed address 192.168.4.2 on the ESP32 access-point network.
+No router, DHCP reservation, or mDNS is required.
 
 PART 3 - BUILD, UPLOAD, AND FIND ESP32 IP
 ==========================================
@@ -116,10 +113,7 @@ Open the serial monitor:
 
 Press the ESP32 reset button. Look for one of these messages:
 
-  Wi-Fi connected. Dashboard: http://192.168.x.x
-
-or:
-
+  Rover Wi-Fi AP: ESP32-Robot
   Dashboard: http://192.168.4.1
 
 Record the printed ESP32 address for the Pi configuration.
@@ -128,13 +122,13 @@ Test the ESP32 from the Pi:
 
   curl --max-time 5 http://ESP32_IP/api/status
 
-Example using the current address:
+Example:
 
-  curl --max-time 5 http://192.168.192.131/api/status
+  curl --max-time 5 http://192.168.4.1/api/status
 
 Expected response shape:
 
-  {"wifi":"192.168.192.131","ap":false,"motionActive":false,"gps":{"fix":false,"latitude":0.000000,"longitude":0.000000,"altitude":0.0,"satellites":0}}
+  {"wifi":"192.168.4.1","ap":true,"motionActive":false,"gps":{"fix":false,"latitude":0.000000,"longitude":0.000000,"altitude":0.0,"satellites":0}}
 
 PART 4 - CREATE OR UPDATE THE RASPBERRY PI REPOSITORY
 ======================================================
@@ -177,25 +171,23 @@ PART 5 - CONFIGURE THE PI GATEWAY
 Create the systemd environment configuration:
 
   sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
-  ESP32_URL=http://esp32-rover.local
+ESP32_URL=http://192.168.4.1
   CAMERA_STREAM_URL=
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
 
-Replace 192.168.192.131 with the current ESP32 IP if it changed.
+Configure the Pi Wi-Fi connection with fixed address 192.168.4.2:
 
-Preferred configuration after flashing the hostname update:
-
-  ESP32_URL=http://esp32-rover.local
+  nmcli connection show --active
+  sudo nmcli connection modify "WIFI_CONNECTION_NAME" ipv4.method manual ipv4.addresses 192.168.4.2/24 ipv4.gateway 192.168.4.1 ipv4.dns 192.168.4.1
+  sudo nmcli connection down "WIFI_CONNECTION_NAME"
+  sudo nmcli connection up "WIFI_CONNECTION_NAME"
+  hostname -I
 
 Verify from the Pi:
 
-  getent hosts esp32-rover.local
-  curl --max-time 5 http://esp32-rover.local/api/status
-
-If mDNS does not resolve on the router, create a DHCP reservation for the
-ESP32 MAC address in the router and use its reserved IPv4 address instead.
+  curl --max-time 5 http://192.168.4.1/api/status
 
 For the temporary phone-camera phase, set CAMERA_STREAM_URL to the MJPEG
 URL provided by the phone camera app. Examples used by camera apps include:

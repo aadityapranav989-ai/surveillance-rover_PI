@@ -13,44 +13,38 @@ Laptop browser -> Raspberry Pi:8080 -> ESP32:80
 
 Both the Pi and ESP32 must be reachable from the same network. If the ESP32 is using its fallback access point, join the Pi to `ESP32-Robot` with password `robot123`; the ESP32 address is `192.168.4.1`. The laptop can join that same access point and browse to the Pi's address.
 
-For normal operation, set Wi-Fi credentials in the ESP32 `src/config.h` and connect the Pi and laptop to that shared router. Use `http://raspberrypi.local:8080/` for the Pi dashboard instead of depending on its changing numeric IP.
+The recommended operation is router-free: the ESP32 creates the `ESP32-Robot`
+access point at `192.168.4.1`. The Pi, laptop, and phone camera join that
+Wi-Fi network directly.
 
-## Keep the Pi address stable
-
-The Pi's mDNS hostname is:
-
-```text
-raspberrypi.local
-```
-
-Open the dashboard from the laptop at:
+## Router-free network
 
 ```text
-http://raspberrypi.local:8080/
+ESP32 access point: 192.168.4.1
+Raspberry Pi:       192.168.4.2
+Laptop:             DHCP address
+Phone camera:       DHCP address
 ```
 
-For a stable numeric address as well, create a DHCP reservation in the
-router. Find the Pi MAC address:
+Join all clients to `ESP32-Robot` with password `robot123`.
+
+Configure the Pi with a fixed Wi-Fi address. First find the active
+connection name:
 
 ```bash
-cat /sys/class/net/wlan0/address
-hostname -I
-ip route
+nmcli connection show --active
 ```
 
-In the router's DHCP/LAN settings, reserve the current Pi MAC address at
-`192.168.192.105`. The router currently appears to be `192.168.192.156`.
-Do not configure a random static address that might already belong to another
-device. After saving the reservation, renew the Pi lease:
+Replace `WIFI_CONNECTION_NAME` below with the Wi-Fi connection name:
 
 ```bash
-sudo nmcli connection show --active
-sudo nmcli device reapply wlan0
+sudo nmcli connection modify "WIFI_CONNECTION_NAME" ipv4.method manual ipv4.addresses 192.168.4.2/24 ipv4.gateway 192.168.4.1 ipv4.dns 192.168.4.1
+sudo nmcli connection down "WIFI_CONNECTION_NAME"
+sudo nmcli connection up "WIFI_CONNECTION_NAME"
 hostname -I
 ```
 
-If the router does not support reservations, keep using
-`http://raspberrypi.local:8080/`.
+Open the dashboard at `http://192.168.4.2:8080/`.
 
 ## Move this repository to the Pi
 
@@ -82,15 +76,16 @@ Do not put passwords or private Wi-Fi credentials in Git. The repository uses on
 
 ```bash
 cd /opt/raspberry-pi-rover
-ESP32_URL=http://esp32-rover.local python3 app.py
+ESP32_URL=http://192.168.4.1 python3 app.py
 ```
 
-From the laptop, open `http://<PI_IP>:8080/`.
+From the laptop, open `http://192.168.4.2:8080/` after joining
+`ESP32-Robot`.
 
 To configure a different ESP32 address:
 
 ```bash
-ESP32_URL=http://192.168.1.50 python3 app.py
+ESP32_URL=http://192.168.4.1 python3 app.py
 ```
 
 ## Phone camera preview
@@ -133,29 +128,27 @@ Create the environment file:
 
 ```bash
 sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
-ESP32_URL=http://esp32-rover.local
+ESP32_URL=http://192.168.4.1
 CAMERA_STREAM_URL=
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
 ```
 
-For a stable ESP32 address, use the mDNS name `esp32-rover.local`:
+For the router-free AP setup, use the fixed ESP32 address `192.168.4.1`:
 
 ```ini
-ESP32_URL=http://esp32-rover.local
+ESP32_URL=http://192.168.4.1
 ```
 
 After flashing the updated ESP32 firmware, verify name resolution from the Pi:
 
 ```bash
-getent hosts esp32-rover.local
-curl --max-time 5 http://esp32-rover.local/api/status
+curl --max-time 5 http://192.168.4.1/api/status
 ```
 
-If the name does not resolve, reserve the ESP32's MAC address in the router's
-DHCP settings and use the reserved `192.168.192.x` address instead. The mDNS
-name is convenient, but a DHCP reservation is the most predictable option.
+The AP address is fixed, so no router reservation or mDNS resolution is
+required.
 
 Install and start the service:
 
