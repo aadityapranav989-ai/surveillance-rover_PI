@@ -195,8 +195,8 @@ ESP32_URL=http://192.168.4.1
 CAMERA_DEVICE=/dev/video0
 CAMERA_WIDTH=640
 CAMERA_HEIGHT=480
-CAMERA_FPS=10
-JPEG_QUALITY=70
+CAMERA_FPS=30
+JPEG_QUALITY=60
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
@@ -227,12 +227,15 @@ values only if the webcam device or format changes:
   CAMERA_DEVICE=/dev/video0
   CAMERA_WIDTH=640
   CAMERA_HEIGHT=480
-  CAMERA_FPS=10
-  JPEG_QUALITY=70
+  CAMERA_FPS=30
+  JPEG_QUALITY=60
 
-The stream crosses the ESP32 Wi-Fi, which has limited bandwidth. If the video
-stutters on the laptop, lower CAMERA_FPS (for example 6) or JPEG_QUALITY (for
-example 55) and restart the service:
+The stream crosses the ESP32 Wi-Fi, which has limited bandwidth. The Pi
+skips frames the Wi-Fi can't carry instead of queueing them, so the video
+stays live. The service log shows the webcam mode, for example
+"(640x480 MJPG @ 30 fps)". If it says YUYV at 5 fps, the webcam has no MJPG
+mode. For a smoother picture, lower JPEG_QUALITY (for example 50) and
+restart the service:
 
   sudo systemctl restart rover-dashboard
 
@@ -305,12 +308,12 @@ faces in blue with their name, unknown faces in red, and the follow target in
 yellow. If it shows "hog" as the body detector or face recognition "off", run
 scripts\download_models.py again.
 
-Set CAMERA_HFOV_DEG (the rover webcam's horizontal field of view, default 60)
-and follow tuning such as FOLLOW_MAX_SPEED as environment variables in the
+Set follow tuning such as FOLLOW_MAX_SPEED as environment variables in the
 same PowerShell window before running the script, for example:
 
-  $env:CAMERA_HFOV_DEG = "65"
   $env:FOLLOW_MAX_SPEED = "120"
+
+All follow settings are listed and explained in config.py.
 
 Enroll faces:
 

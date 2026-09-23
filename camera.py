@@ -11,13 +11,14 @@ class Camera(threading.Thread):
     per frame and shared by all dashboard viewers.
     """
 
-    def __init__(self, source, width, height, fps, jpeg_quality=70):
+    def __init__(self, source, width, height, fps, jpeg_quality=70, fourcc="MJPG"):
         super().__init__(daemon=True, name="camera")
         self.source = source
         self.width = width
         self.height = height
         self.fps = fps
         self.jpeg_quality = jpeg_quality
+        self.fourcc = fourcc
         self.annotate = None
         self.error = "starting"
         self._condition = threading.Condition()
@@ -31,12 +32,16 @@ class Camera(threading.Thread):
 
     def _open(self):
         source = self.source
+        local = source.isdigit() or source.startswith("/dev/")
         if source.isdigit():
             capture = cv2.VideoCapture(int(source), cv2.CAP_V4L2)
-        elif source.startswith("/dev/"):
+        elif local:
             capture = cv2.VideoCapture(source, cv2.CAP_V4L2)
         else:
             capture = cv2.VideoCapture(source)
+        if local and self.fourcc:
+            # Must be set before the frame size for V4L2 to pick the matching mode.
+            capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*self.fourcc))
         capture.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
         capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
         capture.set(cv2.CAP_PROP_FPS, self.fps)
@@ -54,7 +59,11 @@ class Camera(threading.Thread):
                 time.sleep(2)
                 continue
             self.error = None
-            print(f"Camera: streaming from {self.source}")
+            code = int(capture.get(cv2.CAP_PROP_FOURCC))
+            fourcc = "".join(chr((code >> shift) & 0xFF) for shift in (0, 8, 16, 24)).strip("\x00") or "?"
+            print(f"Camera: streaming from {self.source} "
+                  f"({int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))} "
+                  f"{fourcc} @ {capture.get(cv2.CAP_PROP_FPS):.0f} fps)")
             while True:
                 ok, frame = capture.read()
                 if not ok:

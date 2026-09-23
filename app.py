@@ -2,6 +2,8 @@ import html
 import json
 import os
 import signal
+import socket
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,6 +12,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import config
 import esp32
+from alerts import AlertMonitor
 from camera import Camera
 from follow import OPERATOR_STOP, FollowController, FollowSettings
 
@@ -53,6 +56,7 @@ class RoverHandler(BaseHTTPRequestHandler):
     camera = None
     vision = None  # None on the Pi gateway; vision runs on the laptop
     follow = None
+    alerts = None
     autopilot = Autopilot()
 
     def send_payload(self, status, payload, content_type="application/json"):
@@ -80,6 +84,7 @@ class RoverHandler(BaseHTTPRequestHandler):
                 "follow": self.follow.status() if self.follow else None,
                 "known_faces": vision.database.summary() if vision and vision.database else [],
                 "autopilot": self.autopilot.status(),
+                "alerts": self.alerts.status() if self.alerts else None,
             })
         elif path == "/camera":
             self.stream_camera()
@@ -91,6 +96,11 @@ class RoverHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
+        # Keep at most about one frame queued for this viewer. When the Wi-Fi is
+        # slower than the camera, the write below blocks and the next loop sends
+        # the newest frame, so the picture stays live instead of falling behind.
+        self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, config.STREAM_SEND_BUFFER)
+        self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         last_id = 0
         try:
             while True:
@@ -139,11 +149,35 @@ class RoverHandler(BaseHTTPRequestHandler):
                 self.autopilot.block()
                 self.stop_following("manual control")
             self.proxy("/api/command?" + urlencode({"direction": direction, "speed": speed, "value": value}), "POST")
+        elif parsed.path == "/api/drive":
+            try:
+                left, right, ms = int(param("left")), int(param("right")), int(param("ms"))
+            except ValueError:
+                self.send_json(400, {"error": "left, right and ms must be whole numbers"})
+                return
+            if not (-255 <= left <= 255 and -255 <= right <= 255 and 1 <= ms <= 1000):
+                self.send_json(400, {"error": "left and right must be -255..255 and ms 1..1000"})
+                return
+            if automatic:
+                if not self.autopilot.allow_command():
+                    self.send_json(OPERATOR_STOP, {"error": "follow mode stopped by an operator"})
+                    return
+            else:
+                self.autopilot.block()
+                self.stop_following("manual control")
+            self.relay(esp32.drive, left, right, ms)
         elif parsed.path == "/api/autopilot/resume":
             self.autopilot.resume()
             self.send_json(200, self.autopilot.status())
-        elif parsed.path.startswith(("/api/follow", "/api/faces")) and self.vision is None:
+        elif parsed.path.startswith(("/api/follow", "/api/faces", "/api/alerts")) and self.vision is None:
             self.send_json(404, {"error": "vision runs on the laptop, not on this gateway"})
+        elif parsed.path == "/api/alerts/mode":
+            try:
+                self.alerts.set_mode(param("mode").lower())
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
+                return
+            self.send_json(200, self.alerts.status())
         elif parsed.path == "/api/follow":
             target = param("target")
             known = {person["name"] for person in self.vision.database.summary()} if self.vision.database else set()
@@ -173,8 +207,12 @@ class RoverHandler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "not found"})
 
     def proxy(self, path, method):
+        self.relay(esp32.esp32_request, path, method)
+
+    def relay(self, function, *args):
+        """Sends a request to the rover and passes its answer back to the browser."""
         try:
-            status, payload, content_type = esp32.esp32_request(path, method)
+            status, payload, content_type = function(*args)
             self.send_payload(status, payload, content_type)
         except (URLError, TimeoutError, OSError) as error:
             self.send_json(502, {"error": "rover unavailable", "detail": str(error)})
@@ -187,42 +225,52 @@ class RoverHandler(BaseHTTPRequestHandler):
 
 
 def start_vision(camera):
-    # OpenCV models are only loaded where vision runs (the laptop).
+    # OpenCV models are only loaded where vision runs.
+    import cv2
     from vision import Vision
 
+    cv2.setNumThreads(config.VISION_THREADS)
     vision = Vision(camera, config.MODELS_DIR, config.FACES_DIR, config.PERSON_CONFIDENCE,
                     config.FACE_CONFIDENCE, config.FACE_MATCH_THRESHOLD, config.VISION_MAX_FPS)
     camera.annotate = vision.annotate
     follow = FollowController(vision, FollowSettings(
-        hfov_deg=config.CAMERA_HFOV_DEG,
         min_speed=config.FOLLOW_MIN_SPEED,
         max_speed=config.FOLLOW_MAX_SPEED,
-        turn_speed=config.FOLLOW_TURN_SPEED,
-        step_cm=config.FOLLOW_STEP_CM,
-        max_turn_deg=config.FOLLOW_MAX_TURN_DEG,
-        center_tolerance=config.FOLLOW_CENTER_TOLERANCE,
+        turn_min_speed=config.FOLLOW_TURN_MIN_SPEED,
+        turn_max_speed=config.FOLLOW_TURN_MAX_SPEED,
+        steer_gain=config.FOLLOW_STEER_GAIN,
+        command_ms=config.FOLLOW_COMMAND_MS,
+        center_enter=config.FOLLOW_CENTER_ENTER,
+        center_exit=config.FOLLOW_CENTER_EXIT,
         stop_body_height=config.FOLLOW_STOP_BODY_HEIGHT,
         stop_face_height=config.FOLLOW_STOP_FACE_HEIGHT,
+        resume_margin=config.FOLLOW_RESUME_MARGIN,
+        smoothing=config.FOLLOW_SMOOTHING,
+        max_speed_change=config.FOLLOW_MAX_SPEED_CHANGE,
+        lost_grace=config.FOLLOW_LOST_GRACE,
         track_memory=config.FOLLOW_TRACK_MEMORY,
         interval=config.FOLLOW_INTERVAL,
     ))
+    alerts = AlertMonitor(config.SETTINGS_FILE, config.ALERT_CLEAR_AFTER)
+    vision.on_result = alerts.update
     vision.start()
     follow.start()
     print(f"Person detection: {vision.persons.backend}; face recognition: {'on' if vision.database else 'off'}")
-    return vision, follow
+    print(f"Unknown-person alerts: {alerts.mode} mode")
+    return vision, follow, alerts
 
 
 def main():
     camera = Camera(config.CAMERA_SOURCE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT,
-                    config.CAMERA_FPS, config.JPEG_QUALITY)
+                    config.CAMERA_FPS, config.JPEG_QUALITY, config.CAMERA_FOURCC)
     RoverHandler.camera = camera
     if config.VISION_ENABLED:
-        RoverHandler.vision, RoverHandler.follow = start_vision(camera)
+        RoverHandler.vision, RoverHandler.follow, RoverHandler.alerts = start_vision(camera)
     camera.start()
 
     server = ThreadingHTTPServer((config.HOST, config.PORT), RoverHandler)
     server.daemon_threads = True
-    role = "laptop vision" if config.VISION_ENABLED else "Pi gateway (vision off)"
+    role = "vision on" if config.VISION_ENABLED else "gateway, vision off"
     print(f"Rover dashboard [{role}] listening on http://{config.HOST}:{config.PORT}")
     print(f"Camera: {config.CAMERA_SOURCE}; forwarding commands to {config.ESP32_URL}")
 
@@ -238,6 +286,10 @@ def main():
     finally:
         if RoverHandler.follow is not None:
             RoverHandler.follow.disable("shutdown")
+        # Skip interpreter teardown: the camera thread is still inside OpenCV,
+        # and destroying it underneath that thread aborts the process (SIGABRT).
+        sys.stdout.flush()
+        os._exit(0)
 
 
 if __name__ == "__main__":

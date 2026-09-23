@@ -3,86 +3,222 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Raspberry Pi Rover</title>
+<title>Rover Sentry</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:680px;margin:auto;padding:20px 16px 96px;background:#17212b;color:#f5f7fa}
-h1{color:#55d6be;margin-bottom:4px}
-h2{font-size:18px;margin:28px 0 8px;color:#55d6be}
-.status{padding:12px;background:#243442;border-radius:8px;margin:12px 0;line-height:1.6}
-.camera{width:100%;aspect-ratio:4/3;object-fit:contain;background:#0d141b;border-radius:8px;margin:12px 0;display:block}
-.row{display:flex;gap:8px;flex-wrap:wrap}
-.row>*{flex:1;min-width:140px}
-button{min-height:42px;border:0;border-radius:8px;background:#2e8bdb;color:white;font-size:15px;cursor:pointer}
-button.secondary{background:#3b4d5e}
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;max-width:360px;margin:20px auto}
-.grid button{min-height:56px}
-.mode{display:flex;gap:8px;margin:16px 0}.mode button{flex:1}
-.mode button.active{outline:2px solid #55d6be}
-.joystick{width:min(72vw,280px);aspect-ratio:1;margin:20px auto;background:#243442;border:2px solid #647484;border-radius:50%;position:relative;touch-action:none}
-.joystick:after{content:'';position:absolute;inset:18%;border:1px dashed #647484;border-radius:50%}
-.stick{position:absolute;width:76px;aspect-ratio:1;left:50%;top:50%;transform:translate(-50%,-50%);border:0;border-radius:50%;background:#2e8bdb;z-index:1;pointer-events:none}
-.stopbar{position:fixed;left:0;right:0;bottom:0;padding:12px 16px;background:#17212bee;text-align:center}
-.stop{min-height:52px;width:min(100%,360px);background:#d94b4b;font-size:18px;font-weight:700}
-label{display:block;margin:10px 0 4px}
-input,select{width:100%;box-sizing:border-box;padding:10px;border-radius:6px;border:1px solid #647484;background:#243442;color:white;font-size:16px}
-small{color:#b9c5cf}
-ul{list-style:none;padding:0}
-li{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#243442;border-radius:8px;margin:6px 0}
-li button{min-height:34px;padding:0 14px;background:#3b4d5e}
-.following{color:#ffd23f;font-weight:600}
+/* Security-console theme. System fonts only: the rover network has no internet. */
+:root{
+  --bg:#030605; --panel:#08100c; --panel-2:#0c1711; --line:#173524; --line-bright:#23553a;
+  --green:#3dff8a; --green-mid:#22c768; --green-dim:#15703f; --text:#c9f0d8; --muted:#6c9a80;
+  --red:#ff3b3b; --red-dim:#5a1010; --amber:#ffc53d;
+  --mono:ui-monospace,"Cascadia Mono","Consolas","DejaVu Sans Mono","Liberation Mono",monospace;
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;min-height:100vh;background:var(--bg);color:var(--text);font:14px/1.5 var(--mono);padding-bottom:96px;
+  background-image:radial-gradient(ellipse at top,#0a1f14 0,transparent 60%)}
+[hidden]{display:none!important}
+
+/* Top bar */
+.topbar{position:sticky;top:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  padding:10px 16px;background:#030605ee;border-bottom:1px solid var(--line);backdrop-filter:blur(4px)}
+.brand{font-size:18px;font-weight:700;letter-spacing:.18em;color:var(--green);text-shadow:0 0 8px #3dff8a66;display:flex;align-items:center;gap:10px}
+.brand .mark{width:14px;height:14px;border:2px solid var(--green);box-shadow:0 0 8px #3dff8a88;transform:rotate(45deg)}
+.brand small{color:var(--muted);font-weight:400;letter-spacing:.12em;font-size:11px}
+.chips{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border:1px solid var(--line-bright);border-radius:3px;
+  font-size:11px;letter-spacing:.12em;color:var(--muted);text-transform:uppercase}
+.chip i{width:7px;height:7px;border-radius:50%;background:#2b3a31}
+.chip.ok{color:var(--green);border-color:var(--green-dim)}.chip.ok i{background:var(--green);box-shadow:0 0 6px var(--green)}
+.chip.bad{color:var(--red);border-color:#7a2020}.chip.bad i{background:var(--red);box-shadow:0 0 6px var(--red)}
+.chip.armed{color:var(--amber);border-color:#7a5a10}.chip.armed i{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.clock{font-size:13px;color:var(--green);letter-spacing:.1em;min-width:9ch;text-align:right}
+
+/* Layout */
+.layout{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);gap:16px;max-width:1280px;margin:0 auto;padding:16px}
+@media (max-width:900px){.layout{grid-template-columns:1fr}}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:14px;margin-bottom:16px}
+.panel h2{margin:0 0 10px;font-size:12px;font-weight:600;letter-spacing:.2em;color:var(--green-mid);text-transform:uppercase}
+.panel h2::before{content:"// ";color:var(--green-dim)}
+small,.hint{color:var(--muted);font-size:12px;display:block;margin-top:8px}
+
+/* Camera frame with corner brackets and HUD */
+.frame{position:relative;background:#000;border:1px solid var(--line);border-radius:4px;overflow:hidden;transition:border-color .2s,box-shadow .2s}
+.camera{display:block;width:100%;aspect-ratio:4/3;object-fit:contain;background:#000}
+.frame::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,#00000000 0 2px,#0000002e 2px 3px)}
+.corner{position:absolute;width:26px;height:26px;border:2px solid var(--green);opacity:.85;pointer-events:none;z-index:1}
+.corner.tl{top:8px;left:8px;border-right:0;border-bottom:0}.corner.tr{top:8px;right:8px;border-left:0;border-bottom:0}
+.corner.bl{bottom:8px;left:8px;border-right:0;border-top:0}.corner.br{bottom:8px;right:8px;border-left:0;border-top:0}
+.hud{position:absolute;z-index:2;font-size:12px;letter-spacing:.12em;color:var(--green);text-shadow:0 0 4px #000,0 0 6px #000;pointer-events:none}
+.hud.top-left{top:14px;left:42px;display:flex;align-items:center;gap:8px}
+.hud.top-right{top:14px;right:42px}
+.hud.bottom-right{bottom:14px;right:42px;color:var(--muted)}
+.rec{width:9px;height:9px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red);animation:blink 1.2s steps(1) infinite}
+@keyframes blink{50%{opacity:.15}}
+
+/* Alarm state: red frame, pulsing */
+body.alarm .frame{border-color:var(--red);box-shadow:0 0 0 1px var(--red),0 0 28px #ff3b3b88;animation:alarm 1s ease-in-out infinite}
+body.alarm .corner{border-color:var(--red)}
+@keyframes alarm{50%{box-shadow:0 0 0 1px var(--red),0 0 8px #ff3b3b44}}
+.alert{margin:12px 0;padding:12px 14px;border:1px solid var(--red);background:var(--red-dim);color:#ffd9d9;border-radius:4px;
+  font-size:15px;letter-spacing:.06em}
+.alert strong{color:#fff;letter-spacing:.14em;margin-right:8px}
+
+/* Readouts */
+.readout{margin-top:12px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--green-dim);
+  border-radius:4px;white-space:pre-line;color:var(--text)}
+#gps{white-space:normal}
+.following{color:var(--amber)!important;border-left-color:var(--amber)!important}
+
+/* Controls */
+button{font:inherit;font-size:12px;letter-spacing:.12em;text-transform:uppercase;min-height:40px;padding:0 14px;cursor:pointer;
+  color:var(--green);background:transparent;border:1px solid var(--green-dim);border-radius:3px;transition:background .15s,color .15s,box-shadow .15s}
+button:hover{background:#3dff8a14;box-shadow:0 0 10px #3dff8a33}
+button:active{background:var(--green);color:#021208}
+button.secondary{color:var(--muted);border-color:var(--line-bright)}
+button.active{background:var(--green);color:#021208;border-color:var(--green);box-shadow:0 0 12px #3dff8a55}
+button.active.detect{background:var(--red);border-color:var(--red);color:#fff;box-shadow:0 0 14px #ff3b3b77}
+.row{display:flex;gap:8px;flex-wrap:wrap}.row>*{flex:1;min-width:130px}
+.stack>*+*{margin-top:8px}
+label{display:block;margin:0 0 6px;font-size:11px;letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+input,select{width:100%;padding:9px 10px;font:inherit;color:var(--text);background:#020403;border:1px solid var(--line-bright);border-radius:3px;outline:none}
+input:focus,select:focus{border-color:var(--green);box-shadow:0 0 0 1px var(--green-dim)}
+ul{list-style:none;margin:10px 0 0;padding:0}
+li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:3px;margin-top:6px;background:var(--panel-2)}
+li button{min-height:30px;font-size:11px;color:var(--red);border-color:#6a2020}
+
+/* Manual driving */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:300px;margin:14px auto 4px}
+.grid button{min-height:52px}
+.joystick{width:min(70vw,250px);aspect-ratio:1;margin:14px auto 4px;position:relative;touch-action:none;border-radius:50%;
+  background:radial-gradient(circle,#0c1f14 0,#050b08 70%);border:1px solid var(--green-dim);box-shadow:inset 0 0 30px #000,0 0 14px #3dff8a22}
+.joystick::before{content:"";position:absolute;inset:18%;border:1px dashed var(--line-bright);border-radius:50%}
+.joystick::after{content:"";position:absolute;left:50%;top:6%;bottom:6%;border-left:1px solid var(--line)}
+.stick{position:absolute;width:64px;aspect-ratio:1;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%;z-index:1;pointer-events:none;
+  background:radial-gradient(circle at 35% 35%,#8dffba,var(--green-mid) 45%,#0b5a2e);box-shadow:0 0 16px #3dff8a88}
+
+/* Emergency stop */
+.stopbar{position:fixed;left:0;right:0;bottom:0;z-index:6;padding:12px 16px;background:#030605f0;border-top:1px solid var(--line);text-align:center}
+.stop{min-height:50px;width:min(100%,380px);font-size:15px;font-weight:700;letter-spacing:.2em;color:#fff;background:#b01d1d;border:1px solid var(--red);
+  box-shadow:0 0 18px #ff3b3b55}
+.stop:hover{background:#d42626}
+
+/* Phones: drop the extras that crowd a narrow screen */
+@media (max-width:600px){
+  .brand{font-size:15px}.brand small{display:none}
+  .hud{font-size:11px}.hud.top-right,.hud.bottom-right{display:none}
+  .layout{padding:12px}
+}
+@media (prefers-reduced-motion:reduce){.rec,body.alarm .frame{animation:none}}
 </style>
 </head>
 <body>
-<h1>Raspberry Pi Rover</h1>
-<small>Commands go to: {{ESP32_URL}}</small>
-<div class="status" id="gps">Loading GPS...</div>
-<img class="camera" src="/camera" alt="Rover camera with detections">
-<div class="status" id="vision">Vision: starting...</div>
+<header class="topbar">
+  <div class="brand"><span class="mark"></span>ROVER SENTRY <small>SURVEILLANCE CONSOLE</small></div>
+  <div class="chips">
+    <span class="chip" id="chipCam"><i></i>Camera</span>
+    <span class="chip" id="chipLink"><i></i>Rover link</span>
+    <span class="chip" id="chipMode" hidden><i></i>Safe</span>
+    <span class="clock" id="clock">--:--:--</span>
+  </div>
+</header>
 
-<section id="visionControls" hidden>
-<h2>Follow a person</h2>
-<div class="row">
-  <select id="target" aria-label="Person to follow"><option value="">Anyone (closest person)</option></select>
-</div>
-<div class="row" style="margin-top:8px">
-  <button id="followStart">Start following</button>
-  <button id="followStop" class="secondary">Stop following</button>
-</div>
-<div class="status" id="followStatus">Follow mode off</div>
-<small>Any manual drive command or STOP ends follow mode. Test with the wheels lifted first.</small>
+<main class="layout">
+  <section>
+    <div class="frame" id="frame">
+      <img class="camera" src="/camera" alt="Rover camera with detections">
+      <span class="corner tl"></span><span class="corner tr"></span><span class="corner bl"></span><span class="corner br"></span>
+      <div class="hud top-left"><span class="rec"></span>CAM-01 · LIVE</div>
+      <div class="hud top-right" id="camTime"></div>
+      <div class="hud bottom-right">LINK {{ESP32_URL}}</div>
+    </div>
+    <div class="alert" id="alertBanner" role="alert" hidden><strong>&#9888; UNKNOWN PERSON DETECTED</strong><span id="alertWhen"></span></div>
+    <div class="readout" id="vision">Vision: starting...</div>
 
-<h2>Known faces</h2>
-<div class="row">
-  <input id="faceName" maxlength="32" placeholder="Name" aria-label="Name to enroll">
-  <button id="enroll">Enroll face from camera</button>
-</div>
-<small>Only one person in view, facing the camera. Enroll 3-5 photos per person with different angles and lighting. Only enroll people who have agreed to it.</small>
-<ul id="faces"></ul>
-</section>
+    <div class="panel" style="margin-top:16px">
+      <h2>Telemetry</h2>
+      <div id="gps">Loading GPS...</div>
+    </div>
+  </section>
 
-<h2>Manual driving</h2>
-<label for="speed">Speed (1-255)</label>
-<input id="speed" type="number" min="1" max="255" value="150">
-<div class="mode">
-  <button id="modeDpad" class="secondary">D-pad</button>
-  <button id="modeJoystick" class="secondary">Joystick</button>
-</div>
-<div id="dpad" class="grid">
-  <span></span><button data-move="FORWARD">Forward</button><span></span>
-  <button data-move="LEFT">Left</button><span></span><button data-move="RIGHT">Right</button>
-  <span></span><button data-move="BACKWARD">Backward</button><span></span>
-</div>
-<div class="joystick" id="joystick" aria-label="Rover navigation joystick"><div class="stick" id="stick"></div></div>
+  <aside>
+    <section class="panel" id="alertControls" hidden>
+      <h2>Security mode</h2>
+      <div class="row">
+        <button id="modeSafe">Safe · no alerts</button>
+        <button id="modeDetect" class="detect">Detection · alert on unknown</button>
+      </div>
+      <small id="alertInfo"></small>
+    </section>
 
-<div class="stopbar"><button class="stop" id="stopAll">STOP</button></div>
+    <section id="visionControls" hidden>
+      <div class="panel">
+        <h2>Follow target</h2>
+        <div class="stack">
+          <select id="target" aria-label="Person to follow"><option value="">Anyone (closest person)</option></select>
+          <div class="row">
+            <button id="followStart">Start following</button>
+            <button id="followStop" class="secondary">Stop following</button>
+          </div>
+          <div class="readout" id="followStatus">Follow mode off</div>
+        </div>
+        <small>Any manual drive command or STOP ends follow mode. Test with the wheels lifted first.</small>
+      </div>
+
+      <div class="panel">
+        <h2>Known faces</h2>
+        <div class="row">
+          <input id="faceName" maxlength="32" placeholder="Name" aria-label="Name to enroll">
+          <button id="enroll">Enroll face</button>
+        </div>
+        <small>One person in view, facing the camera. Enroll 3-5 photos per person with different angles and lighting. Only enroll people who have agreed to it.</small>
+        <ul id="faces"></ul>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Manual control</h2>
+      <label for="speed">Speed (1-255)</label>
+      <input id="speed" type="number" min="1" max="255" value="150">
+      <div class="row" style="margin-top:10px">
+        <button id="modeDpad" class="secondary">D-pad</button>
+        <button id="modeJoystick" class="secondary">Joystick</button>
+      </div>
+      <div id="dpad" class="grid">
+        <span></span><button data-move="FORWARD">&#9650;</button><span></span>
+        <button data-move="LEFT">&#9664;</button><span></span><button data-move="RIGHT">&#9654;</button>
+        <span></span><button data-move="BACKWARD">&#9660;</button><span></span>
+      </div>
+      <div class="joystick" id="joystick" aria-label="Rover navigation joystick"><div class="stick" id="stick"></div></div>
+    </section>
+  </aside>
+</main>
+
+<div class="stopbar"><button class="stop" id="stopAll">&#9632; Emergency stop</button></div>
 
 <script>
 const $ = selector => document.querySelector(selector);
 const speedEl = $('#speed'), joystick = $('#joystick'), stick = $('#stick');
-// FORWARD/BACKWARD value is centimeters, LEFT/RIGHT value is degrees.
-const STEP = {FORWARD: 5, BACKWARD: 5, LEFT: 10, RIGHT: 10};
+// FORWARD/BACKWARD value is centimeters, LEFT/RIGHT value is degrees. The ESP32
+// runs 15.3 ms per cm and 11.4 ms per degree, so each step (~180 ms) outlasts the
+// 150 ms joystick tick and held movement is continuous.
+const STEP = {FORWARD: 12, BACKWARD: 12, LEFT: 15, RIGHT: 15};
 
 function speedLimit() { return Math.max(1, Math.min(255, Number(speedEl.value) || 150)); }
+
+function setChip(id, state, text) {
+  const chip = $(id);
+  chip.className = 'chip' + (state ? ' ' + state : '');
+  chip.lastChild.textContent = text;
+}
+
+// Browser time: the Pi has no clock battery, so its own time can be wrong.
+function tickClock() {
+  const now = new Date();
+  $('#clock').textContent = now.toLocaleTimeString([], {hour12: false});
+  $('#camTime').textContent = now.toLocaleDateString() + ' ' + now.toLocaleTimeString([], {hour12: false});
+}
+setInterval(tickClock, 1000); tickClock();
 
 async function post(url) {
   const response = await fetch(url, {method: 'POST'});
@@ -96,13 +232,17 @@ function stop() { return post('/api/stop').catch(() => {}).finally(refreshVision
 
 // Only one movement request in flight; extra joystick ticks are dropped instead of queued.
 let moveInFlight = false;
-async function move(direction, speed, value) {
+async function send(url) {
   if (moveInFlight) return;
   moveInFlight = true;
-  try { await post('/api/command?' + new URLSearchParams({direction, speed, value})); }
+  try { await post(url); }
   catch (e) {}
   finally { moveInFlight = false; }
 }
+function move(direction, speed, value) { send('/api/command?' + new URLSearchParams({direction, speed, value})); }
+// Separate left/right wheel speeds: the joystick can curve instead of only driving straight or spinning.
+function drive(left, right, ms) { send('/api/drive?' + new URLSearchParams({left, right, ms})); }
+const JOYSTICK_MS = 400;  // each command outlasts the 150 ms tick (with room for a slow one), so held movement is continuous
 
 document.querySelectorAll('[data-move]').forEach(button => {
   const direction = button.dataset.move;
@@ -122,22 +262,27 @@ setMode('joystick');
 
 // Joystick: pointer movement only updates the stick position. Commands go out on a
 // fixed tick, and the dead zone sends a single stop rather than one per tick.
+// Up/down sets the forward speed and left/right bends the path, so a diagonal
+// push drives in a curve; straight left/right turns on the spot.
 let active = false, joystickX = 0, joystickY = 0, joystickTimer = null, stopped = true;
 function joystickTick() {
-  const distance = Math.hypot(joystickX, joystickY);
+  const distance = Math.min(1, Math.hypot(joystickX, joystickY));
   if (distance < 0.12) {
     if (!stopped) { stopped = true; stop(); }
     return;
   }
   stopped = false;
-  const speed = Math.min(speedLimit(), Math.max(30, Math.round(distance * 255)));
-  const direction = Math.abs(joystickX) > Math.abs(joystickY)
-    ? (joystickX < 0 ? 'LEFT' : 'RIGHT')
-    : (joystickY < 0 ? 'FORWARD' : 'BACKWARD');
-  move(direction, speed, STEP[direction]);
+  const forward = -joystickY;
+  // Soften turning while moving so a diagonal push is a gentle curve; full sideways still spins.
+  const turn = joystickX * (1 - 0.5 * Math.abs(forward));
+  const left = forward + turn, right = forward - turn;
+  // Scale so the faster side runs at the stick's distance times the speed limit.
+  const power = Math.min(speedLimit(), Math.max(30, distance * speedLimit()));
+  const scale = power / Math.max(Math.abs(left), Math.abs(right));
+  drive(Math.round(left * scale), Math.round(right * scale), JOYSTICK_MS);
 }
 function updateJoystick(event) {
-  const bounds = joystick.getBoundingClientRect(), radius = bounds.width / 2, limit = radius - 40;
+  const bounds = joystick.getBoundingClientRect(), radius = bounds.width / 2, limit = radius - 34;
   let x = event.clientX - (bounds.left + radius), y = event.clientY - (bounds.top + radius);
   const length = Math.hypot(x, y);
   if (length > limit) { x = x * limit / length; y = y * limit / length; }
@@ -216,11 +361,53 @@ function renderFaces(known) {
   select.value = known.some(p => p.name === selected) ? selected : '';
 }
 
+// Unknown-person alerts. Safe mode: no alerts. Detection mode: alert as soon as an
+// unrecognized face is seen. The mode is stored on the Pi and shared by every viewer.
+let lastAlertEvent = null, audio = null;
+document.addEventListener('pointerdown', () => {
+  // Browsers only allow sound after the viewer has clicked the page once.
+  try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {}
+}, {once: true});
+function beep() {
+  if (!audio) return;
+  try {
+    const osc = audio.createOscillator(), gain = audio.createGain();
+    osc.frequency.value = 880; gain.gain.value = 0.15;
+    osc.connect(gain).connect(audio.destination);
+    osc.start(); osc.stop(audio.currentTime + 0.4);
+  } catch (e) {}
+}
+function renderAlerts(a) {
+  $('#alertControls').hidden = !a;
+  $('#chipMode').hidden = !a;
+  if (!a) { document.body.classList.remove('alarm'); return; }
+  const detecting = a.mode === 'detection', alarm = detecting && a.active;
+  $('#modeSafe').classList.toggle('active', !detecting);
+  $('#modeDetect').classList.toggle('active', detecting);
+  setChip('#chipMode', alarm ? 'bad' : detecting ? 'armed' : 'ok', alarm ? 'Intruder' : detecting ? 'Armed' : 'Safe');
+  // A new event number means a new unknown person appeared: sound once.
+  if (lastAlertEvent !== null && a.event > lastAlertEvent && a.active) beep();
+  lastAlertEvent = a.event;
+  $('#alertBanner').hidden = !alarm;
+  document.body.classList.toggle('alarm', alarm);
+  if (alarm) $('#alertWhen').textContent = `· ${a.faces} unknown face${a.faces === 1 ? '' : 's'} in view`;
+  $('#alertInfo').textContent = detecting
+    ? (a.active ? '' : 'Watching for unknown people. Enrolled faces do not trigger alerts.')
+    : 'Safe mode: no alerts.';
+}
+function setAlertMode(mode) {
+  post('/api/alerts/mode?' + new URLSearchParams({mode})).catch(e => alert(e.message)).finally(refreshVision);
+}
+$('#modeSafe').addEventListener('click', () => setAlertMode('safe'));
+$('#modeDetect').addEventListener('click', () => setAlertMode('detection'));
+
 async function refreshVision() {
   try {
     const data = await (await fetch('/api/vision')).json();
     const v = data.vision;
+    setChip('#chipCam', data.camera.online ? 'ok' : 'bad', data.camera.online ? 'Camera' : 'Camera off');
     $('#visionControls').hidden = !v;
+    renderAlerts(data.alerts);
     if (!v) {
       // Pi gateway: vision and follow mode run on the laptop.
       const a = data.autopilot;
@@ -232,7 +419,7 @@ async function refreshVision() {
     }
     let text;
     if (!data.camera.online) {
-      text = `Camera offline: ${data.camera.error}`;
+      text = `CAMERA OFFLINE: ${data.camera.error}`;
     } else {
       const names = v.faces.map(f => f.name || 'unknown');
       text = `${v.fps} fps · ${v.persons.length} person${v.persons.length === 1 ? '' : 's'}`
@@ -246,22 +433,27 @@ async function refreshVision() {
     status.classList.toggle('following', f.enabled);
     renderFaces(data.known_faces);
   } catch (e) {
+    setChip('#chipCam', 'bad', 'Pi offline');
     $('#vision').textContent = 'Pi connection lost';
   }
 }
 
 async function refreshGps() {
   try {
-    const d = await (await fetch('/api/status')).json(), g = d.gps;
+    const response = await fetch('/api/status');
+    if (!response.ok) throw new Error(response.statusText);
+    const g = (await response.json()).gps;
+    setChip('#chipLink', 'ok', 'Rover link');
     $('#gps').innerHTML = g.fix
-      ? `GPS fix<br>Lat: ${g.latitude.toFixed(6)}<br>Lon: ${g.longitude.toFixed(6)}<br>Alt: ${g.altitude.toFixed(1)} m | Satellites: ${g.satellites}`
-      : 'Waiting for GPS fix';
+      ? `GPS FIX · ${g.satellites} satellites<br>LAT ${g.latitude.toFixed(6)}<br>LON ${g.longitude.toFixed(6)}<br>ALT ${g.altitude.toFixed(1)} m`
+      : 'GPS: waiting for fix';
   } catch (e) {
+    setChip('#chipLink', 'bad', 'Rover link');
     $('#gps').textContent = 'ESP32 connection lost';
   }
 }
 setInterval(refreshGps, 1000); refreshGps();
-setInterval(refreshVision, 500); refreshVision();
+setInterval(refreshVision, 300); refreshVision();
 </script>
 </body>
 </html>

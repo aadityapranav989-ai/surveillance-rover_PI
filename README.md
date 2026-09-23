@@ -53,10 +53,13 @@ hostname -I
 ```
 
 The video travels over the ESP32's Wi-Fi, which has limited bandwidth. The
-defaults (640x480, 10 fps, JPEG quality 70) use roughly 2-4 Mbit/s. If the
-stream stutters, lower `CAMERA_FPS` or `JPEG_QUALITY` on the Pi. Watch the
-annotated video on the laptop dashboard rather than opening the Pi's stream
-in extra browsers.
+Pi captures from the webcam in its compressed MJPG mode at up to 30 fps and
+queues at most about one frame per viewer (`STREAM_SEND_BUFFER`). When the
+Wi-Fi can't carry every frame, frames are skipped instead of queued, so the
+picture stays live (well under a second behind) rather than drifting
+seconds behind. For a smoother picture on a busy network, lower
+`JPEG_QUALITY` (for example 50) on the Pi. Watch the annotated video on the
+laptop dashboard rather than opening the Pi's stream in extra browsers.
 
 ## Raspberry Pi setup
 
@@ -82,8 +85,8 @@ ESP32_URL=http://192.168.4.1
 CAMERA_DEVICE=/dev/video0
 CAMERA_WIDTH=640
 CAMERA_HEIGHT=480
-CAMERA_FPS=10
-JPEG_QUALITY=70
+CAMERA_FPS=30
+JPEG_QUALITY=60
 ROVER_HOST=0.0.0.0
 ROVER_PORT=8080
 EOF
@@ -150,10 +153,6 @@ VISION_ENABLED=1 ESP32_URL=http://192.168.4.10:8080 CAMERA_STREAM_URL=http://192
   ROVER_HOST=127.0.0.1 ROVER_PORT=8090 .venv/bin/python app.py
 ```
 
-Set `CAMERA_HFOV_DEG` on the laptop to the rover webcam's horizontal field
-of view (default 60). Follow mode uses it to turn the right number of degrees
-towards a person.
-
 ## Face enrollment (laptop)
 
 Face recognition identifies people enrolled on the laptop. To enroll someone:
@@ -173,10 +172,27 @@ A face is accepted as a match when its similarity is at least
 `FACE_MATCH_THRESHOLD` (default `0.363`). Raise the threshold if the rover
 confuses people; lower it if an enrolled person shows as `unknown`.
 
-## Follow mode (laptop)
+## Unknown-person alerts
 
-On the laptop dashboard under **Follow a person**, choose a target and press
-**Start following**:
+Under the video, choose a mode:
+
+- **Safe mode (no alerts)**: the default. Faces are still detected and
+  labelled, but nothing alerts.
+- **Detection mode**: as soon as a face that is not enrolled appears (on the
+  next vision result, about 0.2 s), the dashboard shows a red
+  "Unknown person detected" banner and beeps once. The banner stays while the
+  person is in view and clears `ALERT_CLEAR_AFTER` seconds (default 2) after
+  they leave. Enrolled faces never trigger alerts.
+
+The mode is shared by everyone viewing the dashboard and is saved in
+`settings.json`, so it survives restarts. Browsers only play the beep after
+you have clicked somewhere on the page once. Alerts need a visible face: a
+person facing away from the camera is detected as a body but not identified.
+
+## Follow mode
+
+On the dashboard (the Pi's, or the laptop's when vision runs there) under
+**Follow target**, choose a target and press **Start following**:
 
 - **Anyone**: follows the closest (largest) detected person and sticks with
   that person while they stay in view.
@@ -185,16 +201,31 @@ On the laptop dashboard under **Follow a person**, choose a target and press
   `FOLLOW_TRACK_MEMORY` seconds if the person turns away. If only the face is
   visible, it steers towards the face.
 
-Every `FOLLOW_INTERVAL` seconds the laptop sends one command through the Pi:
+Every `FOLLOW_INTERVAL` (0.25 s) one command is sent. Each command runs for
+`FOLLOW_COMMAND_MS` (0.6 s), so the next one arrives before it ends and the
+rover moves continuously instead of stop-start:
 
-- Target off-center: turn `LEFT`/`RIGHT` by the target's angle from the
-  center of the image, up to `FOLLOW_MAX_TURN_DEG` degrees.
-- Target centered and far away: `FORWARD` by `FOLLOW_STEP_CM`. The rover moves
-  faster when the person is farther away (`FOLLOW_MIN_SPEED` to
-  `FOLLOW_MAX_SPEED`).
+- Approaching: the rover drives towards the person in a curve. Both sides
+  move forward and the side away from the person runs faster (up to
+  `FOLLOW_STEER_GAIN` faster at the edge of the frame), so it bends towards
+  them in one motion. It is faster when the person is farther away
+  (`FOLLOW_MIN_SPEED` to `FOLLOW_MAX_SPEED`).
 - Target fills `FOLLOW_STOP_BODY_HEIGHT` of the frame height: stop (close
-  enough).
-- Target lost, or the camera stream freezes: stop and wait.
+  enough). It drives again once the person has moved away by
+  `FOLLOW_RESUME_MARGIN`, so it does not creep back and forth. While close,
+  it turns on the spot (`FOLLOW_TURN_MIN_SPEED` to `FOLLOW_TURN_MAX_SPEED`)
+  to keep facing the person once they move beyond `FOLLOW_CENTER_ENTER`.
+- Target not detected for a moment: keep going for up to
+  `FOLLOW_LOST_GRACE` (0.8 s) instead of stopping on every missed frame.
+  Lost for longer, or the camera stream freezes: stop and wait.
+
+To keep this smooth, the target's position is averaged across frames
+(`FOLLOW_SMOOTHING`) and the speed changes by at most
+`FOLLOW_MAX_SPEED_CHANGE` per command.
+
+Curved driving uses the ESP32's `/api/drive` command. With older ESP32
+firmware the Pi falls back to straight and spin commands automatically
+(and logs a notice), so flash the latest firmware for smooth curves.
 
 Stopping follow mode:
 
@@ -203,8 +234,7 @@ Stopping follow mode:
   started again from the laptop. The laptop dashboard shows "stopped from the
   Pi dashboard".
 - If the laptop crashes or leaves Wi-Fi, no new commands arrive. The rover
-  finishes its last short step (at most `FOLLOW_STEP_CM` or
-  `FOLLOW_MAX_TURN_DEG`) and stops.
+  finishes its last step (about 0.6 s) and stops.
 
 Test with the wheels lifted first, then in an open area at a low
 `FOLLOW_MAX_SPEED`. The ESP32 watchdog remains the last line of defense.
@@ -215,11 +245,14 @@ Drag the stick away from the center to choose direction and speed:
 
 - Up: forward
 - Down: backward
-- Left/right: turn
+- Diagonal: drive in a curve (a slight push sideways gives a gentle curve)
+- Fully left/right: turn on the spot
 - Farther from center: faster movement
 
 While the stick is held, the dashboard sends one short movement command every
-150 ms, and never more than one at a time. Release the stick, move it to the
+150 ms, and never more than one at a time. Each command sets the left and
+right wheel speeds separately (`/api/drive`), and the ESP32 ramps between
+speeds, so movement is smooth. Release the stick, move it to the
 center, switch browser tabs, or press `STOP` to stop the ESP32. The D-pad
 uses the same speed box as the joystick.
 
@@ -254,6 +287,7 @@ Both roles serve these:
 | GET | `/api/status` | ESP32 status (GPS), proxied |
 | GET | `/api/vision` | Camera state, detections, follow state, enrolled faces, autopilot latch |
 | POST | `/api/command?direction=&speed=&value=` | Manual move; ends follow mode |
+| POST | `/api/drive?left=&right=&ms=` | Manual move with separate wheel speeds (-255..255) for up to 1000 ms; ends follow mode |
 | POST | `/api/stop` | Stop the rover; ends follow mode |
 
 Pi gateway only:
@@ -272,6 +306,7 @@ Laptop only:
 | POST | `/api/follow/stop` | End follow mode |
 | POST | `/api/faces/enroll?name=NAME` | Enroll the single face in view |
 | POST | `/api/faces/delete?name=NAME` | Delete an enrolled person |
+| POST | `/api/alerts/mode?mode=safe\|detection` | Switch unknown-person alerts off or on |
 
 For moves, `value` is centimeters for FORWARD/BACKWARD and degrees for
 LEFT/RIGHT. When the ESP32 rejects a command, its status code and body are
