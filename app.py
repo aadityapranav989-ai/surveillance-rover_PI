@@ -57,6 +57,7 @@ class RoverHandler(BaseHTTPRequestHandler):
     vision = None  # None on the Pi gateway; vision runs on the laptop
     follow = None
     alerts = None
+    rfid = None
     autopilot = Autopilot()
 
     def send_payload(self, status, payload, content_type="application/json"):
@@ -85,6 +86,7 @@ class RoverHandler(BaseHTTPRequestHandler):
                 "known_faces": vision.database.summary() if vision and vision.database else [],
                 "autopilot": self.autopilot.status(),
                 "alerts": self.alerts.status() if self.alerts else None,
+                "rfid": self.rfid.state() if self.rfid else None,
             })
         elif path == "/camera":
             self.stream_camera()
@@ -166,10 +168,13 @@ class RoverHandler(BaseHTTPRequestHandler):
                 self.autopilot.block()
                 self.stop_following("manual control")
             self.relay(esp32.drive, left, right, ms)
+        elif parsed.path == "/api/lcd":
+            # Lets a laptop running vision reach the ESP32's LCD through this gateway.
+            self.relay(esp32.show_lcd, param("line1"), param("line2"))
         elif parsed.path == "/api/autopilot/resume":
             self.autopilot.resume()
             self.send_json(200, self.autopilot.status())
-        elif parsed.path.startswith(("/api/follow", "/api/faces", "/api/alerts")) and self.vision is None:
+        elif parsed.path.startswith(("/api/follow", "/api/faces", "/api/alerts", "/api/cards")) and self.vision is None:
             self.send_json(404, {"error": "vision runs on the laptop, not on this gateway"})
         elif parsed.path == "/api/alerts/mode":
             try:
@@ -178,6 +183,23 @@ class RoverHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": str(error)})
                 return
             self.send_json(200, self.alerts.status())
+        elif parsed.path.startswith("/api/cards") and self.rfid is None:
+            self.send_json(404, {"error": "RFID is turned off (RFID_ENABLED=0)"})
+        elif parsed.path == "/api/cards/enroll":
+            try:
+                self.rfid.start_enrolling(param("name"))
+            except ValueError as error:
+                self.send_json(400, {"error": str(error)})
+                return
+            self.send_json(200, self.rfid.state())
+        elif parsed.path == "/api/cards/cancel":
+            self.rfid.cancel_enrolling()
+            self.send_json(200, self.rfid.state())
+        elif parsed.path == "/api/cards/delete":
+            if not self.rfid.cards.remove(param("uid")):
+                self.send_json(404, {"error": "no such card"})
+                return
+            self.send_json(200, self.rfid.state())
         elif parsed.path == "/api/follow":
             target = param("target")
             known = {person["name"] for person in self.vision.database.summary()} if self.vision.database else set()
@@ -227,6 +249,8 @@ class RoverHandler(BaseHTTPRequestHandler):
 def start_vision(camera):
     # OpenCV models are only loaded where vision runs.
     import cv2
+    from display import LcdDisplay, lcd_lines
+    from rfid import CardStore, Mfrc522, RfidReader
     from vision import Vision
 
     cv2.setNumThreads(config.VISION_THREADS)
@@ -251,13 +275,21 @@ def start_vision(camera):
         track_memory=config.FOLLOW_TRACK_MEMORY,
         interval=config.FOLLOW_INTERVAL,
     ))
-    alerts = AlertMonitor(config.SETTINGS_FILE, config.ALERT_CLEAR_AFTER)
+    alerts = AlertMonitor(config.SETTINGS_FILE, config.ALERT_CLEAR_AFTER, config.AUTH_TIMEOUT,
+                          config.AUTH_GRANT_SECONDS)
     vision.on_result = alerts.update
+    rfid = None
+    if config.RFID_ENABLED:
+        rfid = RfidReader(CardStore(config.CARDS_FILE), alerts.card_tapped,
+                          open_reader=lambda: Mfrc522.open(config.RFID_SPI_BUS, config.RFID_SPI_DEVICE))
+        rfid.start()
+    if config.LCD_ENABLED:
+        LcdDisplay(lambda: lcd_lines(alerts, rfid, follow, vision, camera.online)).start()
     vision.start()
     follow.start()
     print(f"Person detection: {vision.persons.backend}; face recognition: {'on' if vision.database else 'off'}")
-    print(f"Unknown-person alerts: {alerts.mode} mode")
-    return vision, follow, alerts
+    print(f"Unknown-person alerts: {alerts.mode} mode; RFID: {'on' if rfid else 'off'}; LCD: {'on' if config.LCD_ENABLED else 'off'}")
+    return vision, follow, alerts, rfid
 
 
 def main():
@@ -265,7 +297,7 @@ def main():
                     config.CAMERA_FPS, config.JPEG_QUALITY, config.CAMERA_FOURCC)
     RoverHandler.camera = camera
     if config.VISION_ENABLED:
-        RoverHandler.vision, RoverHandler.follow, RoverHandler.alerts = start_vision(camera)
+        RoverHandler.vision, RoverHandler.follow, RoverHandler.alerts, RoverHandler.rfid = start_vision(camera)
     camera.start()
 
     server = ThreadingHTTPServer((config.HOST, config.PORT), RoverHandler)

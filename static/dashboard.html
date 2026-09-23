@@ -63,6 +63,12 @@ body.alarm .corner{border-color:var(--red)}
 .alert{margin:12px 0;padding:12px 14px;border:1px solid var(--red);background:var(--red-dim);color:#ffd9d9;border-radius:4px;
   font-size:15px;letter-spacing:.06em}
 .alert strong{color:#fff;letter-spacing:.14em;margin-right:8px}
+.alert.warn{border-color:var(--amber);background:#3a2b04;color:#ffe9b0}
+.alert.ok{border-color:var(--green);background:#06301a;color:var(--text)}
+.countdown{height:5px;margin-top:10px;background:#00000066;border-radius:3px;overflow:hidden}
+.countdown i{display:block;height:100%;width:100%;background:var(--amber);transition:width .3s linear}
+body.checking .frame{border-color:var(--amber);box-shadow:0 0 0 1px var(--amber),0 0 22px #ffc53d66}
+body.checking .corner{border-color:var(--amber)}
 
 /* Readouts */
 .readout{margin-top:12px;padding:10px 12px;background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--green-dim);
@@ -132,7 +138,10 @@ li button{min-height:30px;font-size:11px;color:var(--red);border-color:#6a2020}
       <div class="hud top-right" id="camTime"></div>
       <div class="hud bottom-right">LINK {{ESP32_URL}}</div>
     </div>
-    <div class="alert" id="alertBanner" role="alert" hidden><strong>&#9888; UNKNOWN PERSON DETECTED</strong><span id="alertWhen"></span></div>
+    <div class="alert" id="alertBanner" role="alert" hidden>
+      <strong id="alertTitle"></strong><span id="alertWhen"></span>
+      <div class="countdown" id="alertCountdown" hidden><i id="alertBar"></i></div>
+    </div>
     <div class="readout" id="vision">Vision: starting...</div>
 
     <div class="panel" style="margin-top:16px">
@@ -146,7 +155,7 @@ li button{min-height:30px;font-size:11px;color:var(--red);border-color:#6a2020}
       <h2>Security mode</h2>
       <div class="row">
         <button id="modeSafe">Safe · no alerts</button>
-        <button id="modeDetect" class="detect">Detection · alert on unknown</button>
+        <button id="modeDetect" class="detect">Detection · check unknown</button>
       </div>
       <small id="alertInfo"></small>
     </section>
@@ -173,6 +182,17 @@ li button{min-height:30px;font-size:11px;color:var(--red);border-color:#6a2020}
         </div>
         <small>One person in view, facing the camera. Enroll 3-5 photos per person with different angles and lighting. Only enroll people who have agreed to it.</small>
         <ul id="faces"></ul>
+      </div>
+
+      <div class="panel" id="rfidPanel" hidden>
+        <h2>RFID access</h2>
+        <div class="readout" id="rfidStatus">Reader: starting...</div>
+        <div class="row" style="margin-top:10px">
+          <input id="cardName" maxlength="32" placeholder="Card holder name" aria-label="Card holder name">
+          <button id="cardAdd">Add card</button>
+        </div>
+        <small id="rfidHelp"></small>
+        <ul id="cards"></ul>
       </div>
     </section>
 
@@ -361,40 +381,121 @@ function renderFaces(known) {
   select.value = known.some(p => p.name === selected) ? selected : '';
 }
 
-// Unknown-person alerts. Safe mode: no alerts. Detection mode: alert as soon as an
-// unrecognized face is seen. The mode is stored on the Pi and shared by every viewer.
-let lastAlertEvent = null, audio = null;
+// Unknown-person checks. Safe mode: nothing. Detection mode: an unrecognized face must
+// be cleared with an authorised RFID card before the countdown ends, or the intruder
+// alarm sounds. The mode is stored on the Pi and shared by every viewer.
+let lastCheck = null, alarmTimer = null, audio = null;
 document.addEventListener('pointerdown', () => {
   // Browsers only allow sound after the viewer has clicked the page once.
   try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); audio.resume(); } catch (e) {}
 }, {once: true});
-function beep() {
+function tone(frequency, start, length) {
   if (!audio) return;
   try {
     const osc = audio.createOscillator(), gain = audio.createGain();
-    osc.frequency.value = 880; gain.gain.value = 0.15;
+    osc.frequency.value = frequency; gain.gain.value = 0.15;
     osc.connect(gain).connect(audio.destination);
-    osc.start(); osc.stop(audio.currentTime + 0.4);
+    osc.start(audio.currentTime + start); osc.stop(audio.currentTime + start + length);
   } catch (e) {}
+}
+function alarmBurst() { for (let i = 0; i < 4; i++) tone(1000, i * 0.22, 0.14); }
+function setAlarmSound(on) {
+  if (on && !alarmTimer) { alarmBurst(); alarmTimer = setInterval(alarmBurst, 1800); }
+  if (!on && alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
 }
 function renderAlerts(a) {
   $('#alertControls').hidden = !a;
   $('#chipMode').hidden = !a;
-  if (!a) { document.body.classList.remove('alarm'); return; }
-  const detecting = a.mode === 'detection', alarm = detecting && a.active;
+  if (!a) { document.body.classList.remove('alarm', 'checking'); setAlarmSound(false); return; }
+  const detecting = a.mode === 'detection', state = detecting ? a.state : 'clear';
   $('#modeSafe').classList.toggle('active', !detecting);
   $('#modeDetect').classList.toggle('active', detecting);
-  setChip('#chipMode', alarm ? 'bad' : detecting ? 'armed' : 'ok', alarm ? 'Intruder' : detecting ? 'Armed' : 'Safe');
-  // A new event number means a new unknown person appeared: sound once.
-  if (lastAlertEvent !== null && a.event > lastAlertEvent && a.active) beep();
-  lastAlertEvent = a.event;
-  $('#alertBanner').hidden = !alarm;
-  document.body.classList.toggle('alarm', alarm);
-  if (alarm) $('#alertWhen').textContent = `· ${a.faces} unknown face${a.faces === 1 ? '' : 's'} in view`;
+  const chip = {alarm: ['bad', 'Intruder'], checking: ['armed', 'Checking'], granted: ['ok', 'Granted']}[state]
+    || (detecting ? ['armed', 'Armed'] : ['ok', 'Safe']);
+  setChip('#chipMode', ...chip);
+  // A new check number means a new unknown person appeared: one beep for the card request.
+  if (lastCheck !== null && a.check > lastCheck && state === 'checking') tone(660, 0, 0.3);
+  lastCheck = a.check;
+  setAlarmSound(state === 'alarm');
+  document.body.classList.toggle('alarm', state === 'alarm');
+  document.body.classList.toggle('checking', state === 'checking');
+
+  const banner = $('#alertBanner'), faces = `${a.faces} unknown face${a.faces === 1 ? '' : 's'} in view`;
+  banner.hidden = !['alarm', 'checking', 'granted'].includes(state);
+  banner.className = 'alert' + (state === 'checking' ? ' warn' : state === 'granted' ? ' ok' : '');
+  $('#alertCountdown').hidden = state !== 'checking';
+  if (state === 'alarm') {
+    $('#alertTitle').textContent = '\u26A0 INTRUDER \u2014 NO AUTHORISATION';
+    $('#alertWhen').textContent = `\u00B7 ${faces}`;
+  } else if (state === 'checking') {
+    $('#alertTitle').textContent = '\u26A0 UNKNOWN PERSON \u2014 TAP RFID CARD';
+    $('#alertWhen').textContent = `\u00B7 ${a.seconds_left} s left`;
+    $('#alertBar').style.width = `${100 * a.seconds_left / a.auth_timeout}%`;
+  } else if (state === 'granted') {
+    $('#alertTitle').textContent = '\u2714 ACCESS GRANTED';
+    $('#alertWhen').textContent = `\u00B7 ${a.granted_name} (${a.granted_left} s)`;
+  }
   $('#alertInfo').textContent = detecting
-    ? (a.active ? '' : 'Watching for unknown people. Enrolled faces do not trigger alerts.')
-    : 'Safe mode: no alerts.';
+    ? `Unknown faces must be cleared with an RFID card within ${a.auth_timeout} s. Enrolled faces are never challenged.`
+    : 'Safe mode: no checks and no alerts.';
 }
+
+// RFID cards: add, remove and see the last tap.
+let cardsKey = '', enrolling = false;
+function renderRfid(r) {
+  $('#rfidPanel').hidden = !r;
+  if (!r) return;
+  const tap = r.last_tap;
+  let text = r.reader === 'ok' ? 'Reader: ready' : `Reader: ${r.reader}`;
+  if (tap && tap.age < 60) {
+    const outcome = tap.enrolled ? `added for ${tap.name}` : tap.authorised ? `granted to ${tap.name}` : 'DENIED (not authorised)';
+    text += `\nLast card ${tap.uid}: ${outcome} \u00B7 ${Math.round(tap.age)} s ago`;
+  }
+  $('#rfidStatus').innerText = text;
+  $('#rfidStatus').classList.toggle('following', r.reader !== 'ok');
+  enrolling = !!r.enrolling;
+  $('#cardAdd').textContent = enrolling ? 'Cancel' : 'Add card';
+  $('#rfidHelp').textContent = enrolling
+    ? `Tap the card for ${r.enrolling.name} on the reader now (${r.enrolling.seconds_left} s).`
+    : 'Type a name, click Add card, then tap the card on the reader.';
+
+  const key = JSON.stringify(r.cards);
+  if (key === cardsKey) return;
+  cardsKey = key;
+  const list = $('#cards');
+  list.replaceChildren();
+  for (const card of r.cards) {
+    const item = document.createElement('li');
+    const label = document.createElement('span');
+    label.textContent = `${card.name} (${card.label})`;
+    const remove = document.createElement('button');
+    remove.textContent = 'Delete';
+    remove.addEventListener('click', async () => {
+      if (!confirm(`Remove ${card.name}'s card?`)) return;
+      await post('/api/cards/delete?' + new URLSearchParams({uid: card.uid})).catch(e => alert(e.message));
+      refreshVision();
+    });
+    item.append(label, remove);
+    list.append(item);
+  }
+  if (!r.cards.length) {
+    const item = document.createElement('li');
+    item.textContent = 'No authorised cards yet.';
+    list.append(item);
+  }
+}
+$('#cardAdd').addEventListener('click', async () => {
+  try {
+    if (enrolling) await post('/api/cards/cancel');
+    else {
+      const name = $('#cardName').value.trim();
+      if (!name) { alert("Enter the card holder's name first."); return; }
+      await post('/api/cards/enroll?' + new URLSearchParams({name}));
+    }
+  } catch (e) { alert(e.message); }
+  refreshVision();
+});
+
 function setAlertMode(mode) {
   post('/api/alerts/mode?' + new URLSearchParams({mode})).catch(e => alert(e.message)).finally(refreshVision);
 }
@@ -408,6 +509,7 @@ async function refreshVision() {
     setChip('#chipCam', data.camera.online ? 'ok' : 'bad', data.camera.online ? 'Camera' : 'Camera off');
     $('#visionControls').hidden = !v;
     renderAlerts(data.alerts);
+    renderRfid(data.rfid);
     if (!v) {
       // Pi gateway: vision and follow mode run on the laptop.
       const a = data.autopilot;
