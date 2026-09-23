@@ -249,7 +249,7 @@ class RoverHandler(BaseHTTPRequestHandler):
 def start_vision(camera):
     # OpenCV models are only loaded where vision runs.
     import cv2
-    from display import LcdDisplay, lcd_lines
+    from display import LcdDisplay, RecentNames, lcd_lines
     from rfid import CardStore, Mfrc522, RfidReader
     from vision import Vision
 
@@ -284,7 +284,9 @@ def start_vision(camera):
                           open_reader=lambda: Mfrc522.open(config.RFID_SPI_BUS, config.RFID_SPI_DEVICE))
         rfid.start()
     if config.LCD_ENABLED:
-        LcdDisplay(lambda: lcd_lines(alerts, rfid, follow, vision, camera.online)).start()
+        recent = RecentNames()
+        LcdDisplay(lambda: lcd_lines(alerts, rfid, follow, vision, camera.online,
+                                     recent.update(vision.status()["faces"]))).start()
     vision.start()
     follow.start()
     print(f"Person detection: {vision.persons.backend}; face recognition: {'on' if vision.database else 'off'}")

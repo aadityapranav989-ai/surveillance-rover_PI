@@ -6,9 +6,34 @@ import esp32
 from alerts import ALARM, CHECKING, DETECTION, GRANTED
 
 TAP_MESSAGE_SECONDS = 3
+WELCOME_HOLD_SECONDS = 3
 
 
-def lcd_lines(alerts, rfid, follow, vision, camera_online):
+class RecentNames:
+    """Known people seen in the last few seconds, so a missed frame does not blank the welcome."""
+
+    def __init__(self, hold=WELCOME_HOLD_SECONDS, clock=time.monotonic):
+        self.hold = hold
+        self.clock = clock
+        self._last_seen = {}
+
+    def update(self, faces):
+        """Takes the vision status' face list; returns names seen recently, most recent first."""
+        now = self.clock()
+        for face in faces:
+            if face.get("name"):
+                self._last_seen[face["name"]] = now
+        self._last_seen = {name: t for name, t in self._last_seen.items() if now - t <= self.hold}
+        return sorted(self._last_seen, key=self._last_seen.get, reverse=True)
+
+
+def welcome_line(names):
+    """One LCD line of names: "Asha", "Asha, Ravi", or "Asha +2" when they do not fit."""
+    text = ", ".join(names)
+    return text if len(text) <= 16 else f"{names[0][:12]} +{len(names) - 1}"
+
+
+def lcd_lines(alerts, rfid, follow, vision, camera_online, known_names=()):
     """The two 16-character lines the ESP32's LCD should show, most urgent first."""
     a = alerts.status()
     tap = rfid.state()["last_tap"] if rfid else None
@@ -24,6 +49,9 @@ def lcd_lines(alerts, rfid, follow, vision, camera_online):
             return "!! INTRUDER !!", "Alert sent"
         if a["state"] == CHECKING:
             return "UNKNOWN PERSON", f"Tap card: {a['seconds_left']}s"
+    if known_names:
+        return "WELCOME", welcome_line(list(known_names))
+    if a["mode"] == DETECTION:
         if a["state"] == GRANTED:
             return "AUTHORISED", a["granted_name"]
     if follow and follow.enabled:
