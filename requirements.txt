@@ -1,3 +1,5 @@
 # OpenCV 5 removed the Caffe loader used by the MobileNet-SSD body detector.
 opencv-python-headless>=4.8,<5
 numpy
+# RC522 RFID reader over SPI (Raspberry Pi only)
+spidev; sys_platform == "linux"

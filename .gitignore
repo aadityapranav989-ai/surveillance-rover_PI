@@ -8,3 +8,5 @@ models/
 faces/
 # Local settings such as the alert mode.
 settings.json
+# Authorised RFID cards (names and card IDs).
+cards.json

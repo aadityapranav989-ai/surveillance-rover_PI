@@ -172,22 +172,82 @@ A face is accepted as a match when its similarity is at least
 `FACE_MATCH_THRESHOLD` (default `0.363`). Raise the threshold if the rover
 confuses people; lower it if an enrolled person shows as `unknown`.
 
-## Unknown-person alerts
+## Security mode, RFID authorisation and the LCD
 
 Under the video, choose a mode:
 
 - **Safe mode (no alerts)**: the default. Faces are still detected and
-  labelled, but nothing alerts.
-- **Detection mode**: as soon as a face that is not enrolled appears (on the
-  next vision result, about 0.2 s), the dashboard shows a red
-  "Unknown person detected" banner and beeps once. The banner stays while the
-  person is in view and clears `ALERT_CLEAR_AFTER` seconds (default 2) after
-  they leave. Enrolled faces never trigger alerts.
+  labelled, but nothing is checked and nothing alerts.
+- **Detection mode**: when a face that is not enrolled appears, the rover
+  asks for an RFID card:
+  1. The LCD shows `UNKNOWN PERSON` / `Tap card: 10s` counting down, and the
+     dashboard shows an amber countdown banner and beeps once.
+  2. An authorised card tapped on the reader within `AUTH_TIMEOUT` (10 s)
+     shows `ACCESS GRANTED` and a green banner. Unknown faces are then
+     allowed for `AUTH_GRANT_SECONDS` (2 minutes).
+  3. No authorised card in time: the dashboard raises the red **INTRUDER**
+     alarm with repeated beeps, and the LCD shows `!! INTRUDER !!`. Tapping
+     an authorised card still cancels it.
+  4. An unregistered card shows `ACCESS DENIED` and changes nothing.
+
+  The check ends by itself if the unknown person leaves (no unknown face for
+  `ALERT_CLEAR_AFTER`, 2 s). Enrolled faces are never challenged.
 
 The mode is shared by everyone viewing the dashboard and is saved in
-`settings.json`, so it survives restarts. Browsers only play the beep after
-you have clicked somewhere on the page once. Alerts need a visible face: a
+`settings.json`, so it survives restarts. Browsers only play sounds after
+you have clicked somewhere on the page once. Checks need a visible face: a
 person facing away from the camera is detected as a body but not identified.
+
+### Authorised cards
+
+In the dashboard's **RFID access** panel, type the card holder's name, click
+**Add card**, and tap the card on the reader within 20 seconds. Cards are
+saved on the Pi in `cards.json` (not in Git); **Delete** removes one. The
+panel also shows whether the reader is working and the last card tapped.
+The reader handles the 4-byte-ID MIFARE cards and key fobs that come with
+RC522 kits.
+
+### RC522 reader wiring (Raspberry Pi)
+
+Power the RC522 from **3.3 V only**; 5 V damages it.
+
+| RC522 pin | Raspberry Pi pin |
+| --- | --- |
+| SDA (SS) | GPIO8 / CE0 (pin 24) |
+| SCK | GPIO11 (pin 23) |
+| MOSI | GPIO10 (pin 19) |
+| MISO | GPIO9 (pin 21) |
+| IRQ | not connected |
+| GND | GND (pin 20) |
+| RST | 3.3 V (pin 17) |
+| 3.3V | 3.3 V (pin 1) |
+
+Turn on SPI once, install the SPI package into the Python environment, and
+restart:
+
+```bash
+sudo raspi-config nonint do_spi 0
+sudo reboot
+```
+
+```bash
+cd /opt/raspberry-pi-rover && .venv/bin/pip install -r requirements.txt
+sudo systemctl restart rover-dashboard
+journalctl -u rover-dashboard -n 20 --no-pager | grep RFID
+```
+
+The log shows `RFID: RC522 ready`. If it shows `not found`, check the wiring
+and that `/dev/spidev0.0` exists. RFID runs on the machine that runs vision;
+set `RFID_ENABLED=0` to turn it off.
+
+### 16x2 LCD (on the ESP32)
+
+The LCD with an I2C backpack connects to the ESP32 (wiring in the ESP32
+repository's README). The Pi sends it the current status twice a second
+when it changes: `SAFE MODE`, `DETECTION MODE`, `UNKNOWN PERSON` with the
+countdown, `ACCESS GRANTED`, `!! INTRUDER !!`, `FOLLOWING`, and so on. If
+the Pi stops sending for 10 seconds, the ESP32 shows its own status instead
+of a stale message. Set `LCD_ENABLED=0` to stop the Pi sending.
 
 ## Follow mode
 
@@ -297,6 +357,7 @@ Pi gateway only:
 | POST | `/api/command?...&source=auto` | Follow-mode move from the laptop; `423` after an operator stop |
 | POST | `/api/stop?source=auto` | Follow-mode stop; does not block follow mode |
 | POST | `/api/autopilot/resume` | Allow follow-mode commands again (sent when follow mode starts) |
+| POST | `/api/lcd?line1=&line2=` | Pass LCD text from a laptop running vision to the ESP32 |
 
 Laptop only:
 
@@ -306,6 +367,9 @@ Laptop only:
 | POST | `/api/follow/stop` | End follow mode |
 | POST | `/api/faces/enroll?name=NAME` | Enroll the single face in view |
 | POST | `/api/faces/delete?name=NAME` | Delete an enrolled person |
+| POST | `/api/cards/enroll?name=NAME` | Save the next RFID card tapped (within 20 s) for NAME |
+| POST | `/api/cards/cancel` | Stop waiting for a card to add |
+| POST | `/api/cards/delete?uid=UID` | Remove an authorised card |
 | POST | `/api/alerts/mode?mode=safe\|detection` | Switch unknown-person alerts off or on |
 
 For moves, `value` is centimeters for FORWARD/BACKWARD and degrees for

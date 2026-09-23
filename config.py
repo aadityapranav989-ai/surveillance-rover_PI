@@ -1,4 +1,5 @@
 import os
+import sys
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -68,6 +69,18 @@ FACE_MATCH_THRESHOLD = _float("FACE_MATCH_THRESHOLD", 0.363)
 # Unknown-person alerts (detection mode): an alert starts on the first
 # unrecognized face and clears once none has been seen for this many seconds.
 ALERT_CLEAR_AFTER = _float("ALERT_CLEAR_AFTER", 2)
+# RFID authorisation (detection mode): when an unknown face appears, an
+# authorised card must be tapped within AUTH_TIMEOUT seconds or the intruder
+# alarm starts. A tapped card grants access for AUTH_GRANT_SECONDS.
+AUTH_TIMEOUT = _float("AUTH_TIMEOUT", 10)
+AUTH_GRANT_SECONDS = _float("AUTH_GRANT_SECONDS", 120)
+# RC522 reader on the Pi's SPI bus 0, chip select 0 (/dev/spidev0.0).
+RFID_ENABLED = _flag("RFID_ENABLED", "1" if sys.platform.startswith("linux") else "0")
+RFID_SPI_BUS = _int("RFID_SPI_BUS", 0)
+RFID_SPI_DEVICE = _int("RFID_SPI_DEVICE", 0)
+CARDS_FILE = os.getenv("CARDS_FILE", os.path.join(BASE_DIR, "cards.json"))
+# Show security status on the ESP32's 16x2 LCD.
+LCD_ENABLED = _flag("LCD_ENABLED", "1")
 # Remembers the alert mode (safe/detection) across restarts.
 SETTINGS_FILE = os.getenv("SETTINGS_FILE", os.path.join(BASE_DIR, "settings.json"))
 

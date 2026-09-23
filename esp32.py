@@ -71,6 +71,11 @@ def drive(left, right, ms, source=None):
     return send_command(*legacy_command(left, right, ms), source)
 
 
+def show_lcd(line1, line2):
+    """Shows two lines on the ESP32's 16x2 LCD."""
+    return esp32_request("/api/lcd?" + urlencode({"line1": line1[:16], "line2": line2[:16]}), "POST")
+
+
 def send_stop(source=None):
     return esp32_request("/api/stop" + ("?source=" + source if source else ""), "POST")
 
