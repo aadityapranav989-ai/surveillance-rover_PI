@@ -75,11 +75,6 @@ def send_stop(source=None):
     return esp32_request("/api/stop" + ("?source=" + source if source else ""), "POST")
 
 
-def send_lcd_status(state, detail):
-    """Publishes the short vision status shown on the rover's LCD."""
-    return esp32_request("/api/lcd/status?" + urlencode({"state": state, "detail": detail}), "POST")
-
-
 def resume_autopilot():
     """Re-allows follow-mode commands on the Pi gateway (a no-op 404 when talking to the ESP32 directly)."""
     return esp32_request("/api/autopilot/resume", "POST")
