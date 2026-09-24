@@ -14,7 +14,7 @@ class FollowSettings:
     max_speed: int
     turn_min_speed: int  # turning on the spot, used once close to the person
     turn_max_speed: int
-    steer_gain: int  # wheel speed difference when the person is at the edge of the frame
+    full_steer_offset: float  # offset (fraction of width) at which the curve is at its tightest
     command_ms: int  # each command's run time; outlasts the interval so motion is continuous
     center_enter: float  # when close, start turning on the spot at this offset (fraction of width)
     center_exit: float  # ...and stop once back within this; also the steering dead zone
@@ -117,10 +117,14 @@ class Steering:
         # Ease off when the person is far to one side, so the curve can be tighter.
         sharpness = min(1.0, max(0.0, abs(self.offset) - 0.2) / 0.3)
         base = self._ramp(target * (1 - 0.4 * sharpness))
-        steer = 0.0 if abs(self.offset) < s.center_exit else s.steer_gain * self.offset / 0.5
-        left = max(-255, min(255, round(base + steer)))
-        right = max(-255, min(255, round(base - steer)))
-        return left, right
+        # Skid steering only turns with a large wheel-speed difference, so the side away
+        # from the person ramps up to full turn power while the near side slows down.
+        steer = 0.0
+        if abs(self.offset) >= s.center_exit:
+            steer = min(1.0, (abs(self.offset) - s.center_exit) / (s.full_steer_offset - s.center_exit))
+        outer = round(base + (max(s.turn_max_speed, base) - base) * steer)
+        inner = round(base * (1 - steer))
+        return (outer, inner) if self.offset > 0 else (inner, outer)
 
     def _face_on_the_spot(self):
         s = self.settings

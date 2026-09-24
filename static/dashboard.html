@@ -313,6 +313,9 @@ const speedEl = $('#speed'), joystick = $('#joystick'), stick = $('#stick');
 const STEP = {FORWARD: 12, BACKWARD: 12, LEFT: 15, RIGHT: 15};
 
 function speedLimit() { return Math.max(1, Math.min(255, Number(speedEl.value) || 150)); }
+// Skid steering only turns at high power (TURN_POWER on the Pi, 255 by default), so turns
+// use it whatever the speed box says; the speed box sets straight-line speed.
+const TURN_POWER = Math.max(1, Math.min(255, Number('{{TURN_POWER}}') || 255));
 
 function setChip(id, state, text) {
   const chip = $(id);
@@ -354,7 +357,8 @@ const JOYSTICK_MS = 400;  // each command outlasts the 150 ms tick (with room fo
 
 document.querySelectorAll('[data-move]').forEach(button => {
   const direction = button.dataset.move;
-  button.addEventListener('click', () => move(direction, speedLimit(), STEP[direction]));
+  const turn = direction === 'LEFT' || direction === 'RIGHT';
+  button.addEventListener('click', () => move(direction, turn ? TURN_POWER : speedLimit(), STEP[direction]));
 });
 $('#stopAll').addEventListener('click', stop);
 
@@ -390,8 +394,11 @@ function joystickTick() {
   // Soften turning while moving so a diagonal push is a gentle curve; full sideways still spins.
   const turn = joystickX * (1 - 0.5 * Math.abs(forward));
   const left = forward + turn, right = forward - turn;
-  // Scale so the faster side runs at the stick's distance times the speed limit.
-  const power = Math.min(speedLimit(), Math.max(30, distance * speedLimit()));
+  // The faster side runs at the stick's distance times the speed limit when driving straight,
+  // rising to TURN_POWER as the push becomes a turn (skid steering needs it to turn at all).
+  const turnShare = Math.abs(turn) / (Math.abs(forward) + Math.abs(turn));
+  const limit = speedLimit() + (Math.max(TURN_POWER, speedLimit()) - speedLimit()) * turnShare;
+  const power = Math.min(limit, Math.max(30, distance * limit));
   const scale = power / Math.max(Math.abs(left), Math.abs(right));
   drive(Math.round(left * scale), Math.round(right * scale), JOYSTICK_MS);
 }
@@ -504,10 +511,15 @@ function gtaTick() {
   // Map speed onto the range where the motors actually move, so gas responds at once.
   const floor = Math.min(GTA.minPower, speedLimit());
   const base = Math.sign(gtaSpeed) * (floor + (speedLimit() - floor) * Math.abs(gtaSpeed));
-  // Like a car, the turn scales with speed; in reverse the nose swings the other way.
-  const turn = gtaSteer * GTA.steerMix * Math.abs(base);
+  // Steering: the outer side ramps up to TURN_POWER and the inner side slows, like a car's
+  // path bending (skid steering needs the full power difference to turn). In reverse the
+  // nose swings the other way, as it does for a reversing car.
+  const s = Math.abs(gtaSteer), dir = Math.sign(base);
+  const outer = dir * (Math.abs(base) + (Math.max(TURN_POWER, Math.abs(base)) - Math.abs(base)) * s);
+  const inner = base * (1 - GTA.steerMix * s);
   const clamp = v => Math.max(-255, Math.min(255, Math.round(v)));
-  drive(clamp(base + turn), clamp(base - turn), GTA.commandMs);
+  const [left, right] = gtaSteer >= 0 ? [outer, inner] : [inner, outer];
+  drive(clamp(left), clamp(right), GTA.commandMs);
 }
 function resetGta() {
   Object.keys(gtaKeys).forEach(key => { gtaKeys[key] = false; });

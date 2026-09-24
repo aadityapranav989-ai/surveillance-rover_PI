@@ -281,11 +281,11 @@ Every `FOLLOW_INTERVAL` (0.25 s) one command is sent. Each command runs for
 `FOLLOW_COMMAND_MS` (0.6 s), so the next one arrives before it ends and the
 rover moves continuously instead of stop-start:
 
-- Approaching: the rover drives towards the person in a curve. Both sides
-  move forward and the side away from the person runs faster (up to
-  `FOLLOW_STEER_GAIN` faster at the edge of the frame), so it bends towards
-  them in one motion. It is faster when the person is farther away
-  (`FOLLOW_MIN_SPEED` to `FOLLOW_MAX_SPEED`).
+- Approaching: the rover drives towards the person in a curve. The side away
+  from the person ramps up to `TURN_POWER` and the near side slows, reaching
+  the tightest curve when the person is `FOLLOW_FULL_STEER_OFFSET` (30%)
+  off-center, so it bends towards them in one motion. It is faster when the
+  person is farther away (`FOLLOW_MIN_SPEED` to `FOLLOW_MAX_SPEED`).
 - Target fills `FOLLOW_STOP_BODY_HEIGHT` of the frame height: stop (close
   enough). It drives again once the person has moved away by
   `FOLLOW_RESUME_MARGIN`, so it does not creep back and forth. While close,
@@ -355,6 +355,13 @@ right wheel speeds separately (`/api/drive`), and the ESP32 ramps between
 speeds, so movement is smooth. Release the stick, move it to the
 center, switch browser tabs, or press `STOP` to stop the ESP32. The D-pad
 uses the same speed box as the joystick.
+
+**Turning power.** This rover steers by driving its left and right wheels at
+different speeds (skid steering), and the wheels only scrub round at full
+power. So every turn (joystick sideways or diagonal, D-pad ◀ ▶, GTA steering,
+and follow mode) uses `TURN_POWER` (default 255) whatever the speed box says;
+the speed box sets straight-line speed. On a smoother floor that needs less,
+set `TURN_POWER` lower in `/etc/default/rover-dashboard`.
 
 ## Location
 

@@ -20,6 +20,7 @@ with open(os.path.join(config.BASE_DIR, "static", "dashboard.html"), encoding="u
     DASHBOARD = (dashboard_file.read()
                  .replace("{{ESP32_URL}}", html.escape(config.ESP32_URL))
                  .replace("{{ROVER_LOCATION}}", html.escape(config.ROVER_LOCATION))
+                 .replace("{{TURN_POWER}}", str(config.TURN_POWER))
                  .encode())
 
 
@@ -273,7 +274,7 @@ def start_vision(camera):
         max_speed=config.FOLLOW_MAX_SPEED,
         turn_min_speed=config.FOLLOW_TURN_MIN_SPEED,
         turn_max_speed=config.FOLLOW_TURN_MAX_SPEED,
-        steer_gain=config.FOLLOW_STEER_GAIN,
+        full_steer_offset=config.FOLLOW_FULL_STEER_OFFSET,
         command_ms=config.FOLLOW_COMMAND_MS,
         center_enter=config.FOLLOW_CENTER_ENTER,
         center_exit=config.FOLLOW_CENTER_EXIT,

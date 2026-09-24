@@ -99,13 +99,16 @@ FOLLOW_COMMAND_MS = _int("FOLLOW_COMMAND_MS", 700)
 # about 100 a loaded rover barely moves.
 FOLLOW_MIN_SPEED = _int("FOLLOW_MIN_SPEED", 120)
 FOLLOW_MAX_SPEED = _int("FOLLOW_MAX_SPEED", 190)
-# While approaching, the rover curves towards the person: the outer side runs
-# up to FOLLOW_STEER_GAIN faster than the inner side when they are at the edge
-# of the frame.
-FOLLOW_STEER_GAIN = _int("FOLLOW_STEER_GAIN", 110)
+# Motor power needed to turn. This skid-steer rover only turns at full power, so
+# turns in every mode (follow, joystick, D-pad, GTA) use TURN_POWER.
+TURN_POWER = _int("TURN_POWER", 255)
+# While approaching, the rover curves towards the person: the far side ramps up to
+# TURN_POWER and the near side slows, reaching the tightest curve when the person
+# is FOLLOW_FULL_STEER_OFFSET (fraction of the frame width) off-center.
+FOLLOW_FULL_STEER_OFFSET = _float("FOLLOW_FULL_STEER_OFFSET", 0.3)
 # Once close, it turns on the spot to keep facing the person.
-FOLLOW_TURN_MIN_SPEED = _int("FOLLOW_TURN_MIN_SPEED", 110)
-FOLLOW_TURN_MAX_SPEED = _int("FOLLOW_TURN_MAX_SPEED", 160)
+FOLLOW_TURN_MIN_SPEED = _int("FOLLOW_TURN_MIN_SPEED", TURN_POWER)
+FOLLOW_TURN_MAX_SPEED = _int("FOLLOW_TURN_MAX_SPEED", TURN_POWER)
 # When close, start turning on the spot once the person is this far off-center
 # (fraction of the frame width), and stop once back within FOLLOW_CENTER_EXIT.
 # FOLLOW_CENTER_EXIT is also the steering dead zone while approaching.
