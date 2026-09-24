@@ -287,6 +287,15 @@ To keep this smooth, the target's position is averaged across frames
 (`FOLLOW_SMOOTHING`) and the speed changes by at most
 `FOLLOW_MAX_SPEED_CHANGE` per command.
 
+Drive commands go from the Pi to the ESP32 as UDP packets (port 4210) when
+the ESP32 firmware supports it. Over HTTP, each command opens a new
+connection, and on the rover's busy Wi-Fi a lost connection-setup packet
+delays a command by a full second, which makes the rover stop and lurch. A
+lost UDP packet costs nothing: the next command replaces it. STOP is sent
+over both UDP and HTTP. The browser also keeps one connection open to the Pi
+for all joystick commands. The Pi logs `ESP32 drive commands: UDP port 4210`
+at start-up, or `HTTP` with older firmware.
+
 Curved driving uses the ESP32's `/api/drive` command. With older ESP32
 firmware the Pi falls back to straight and spin commands automatically
 (and logs a notice), so flash the latest firmware for smooth curves.

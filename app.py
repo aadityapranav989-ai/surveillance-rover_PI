@@ -53,6 +53,11 @@ class Autopilot:
 
 
 class RoverHandler(BaseHTTPRequestHandler):
+    # HTTP/1.1 keeps the browser's connection open between joystick commands, so each
+    # command does not need a new connection (a lost connection-setup packet on the
+    # rover Wi-Fi delays a request by a full second). Every response sends Content-Length.
+    protocol_version = "HTTP/1.1"
+    timeout = 60  # close idle kept-alive connections
     camera = None
     vision = None  # None on the Pi gateway; vision runs on the laptop
     follow = None
@@ -97,6 +102,8 @@ class RoverHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")  # an endless stream has no Content-Length
+        self.close_connection = True
         self.end_headers()
         # Keep at most about one frame queued for this viewer. When the Wi-Fi is
         # slower than the camera, the write below blocks and the next loop sends
@@ -131,7 +138,7 @@ class RoverHandler(BaseHTTPRequestHandler):
             if not automatic:
                 self.autopilot.block()
                 self.stop_following("stopped")
-            self.proxy("/api/stop", "POST")
+            self.relay(esp32.send_stop)  # UDP first for speed, then HTTP to confirm
         elif parsed.path == "/api/command":
             direction = param("direction").upper()
             try:
@@ -298,6 +305,7 @@ def main():
     camera = Camera(config.CAMERA_SOURCE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT,
                     config.CAMERA_FPS, config.JPEG_QUALITY, config.CAMERA_FOURCC)
     RoverHandler.camera = camera
+    esp32.udp_port()  # start the UDP support check now, so the first drive command can use it
     if config.VISION_ENABLED:
         RoverHandler.vision, RoverHandler.follow, RoverHandler.alerts, RoverHandler.rfid = start_vision(camera)
     camera.start()

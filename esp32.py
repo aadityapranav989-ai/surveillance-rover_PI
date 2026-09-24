@@ -1,6 +1,9 @@
+import json
+import socket
+import threading
 import time
 from urllib.error import HTTPError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from config import ESP32_MS_PER_CM, ESP32_MS_PER_DEGREE, ESP32_URL, REQUEST_TIMEOUT
@@ -56,11 +59,57 @@ def legacy_command(left, right, ms):
     return ("FORWARD" if forward >= 0 else "BACKWARD"), max(1, round(abs(forward))), round(ms / ESP32_MS_PER_CM, 1)
 
 
+# Drive commands over UDP. Each HTTP command opens a new TCP connection, and on the
+# rover's busy Wi-Fi a lost connection-setup packet delays it by a full second, so the
+# previous pulse runs out and the rover jerks. A lost UDP packet costs nothing: the
+# next command replaces it. Used only when ESP32_URL is the ESP32 itself and its
+# firmware reports udpPort; a laptop talking to the Pi gateway keeps using HTTP.
+UDP_RECHECK_SECONDS = 30
+_esp32_host = urlparse(ESP32_URL).hostname
+_udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+_udp = {"port": None, "checked": None, "refreshing": False}
+
+
+def refresh_udp_port():
+    """Asks the ESP32 whether it takes UDP commands; returns the port or None."""
+    try:
+        status, body, _ = esp32_request("/api/status")
+        info = json.loads(body) if status == 200 else {}
+    except (OSError, ValueError):
+        info = {}
+    # A Pi gateway proxies the ESP32's status too, so check the answer came from the ESP32 itself.
+    port = info.get("udpPort") if info.get("wifi") == _esp32_host else None
+    if port != _udp["port"]:
+        print(f"ESP32 drive commands: {'UDP port ' + str(port) if port else 'HTTP'}")
+    _udp.update(port=port, checked=time.monotonic(), refreshing=False)
+    return port
+
+
+def udp_port():
+    """The cached UDP port (or None). Rechecks in the background so no command waits for it."""
+    stale = _udp["checked"] is None or time.monotonic() - _udp["checked"] > UDP_RECHECK_SECONDS
+    if stale and not _udp["refreshing"]:
+        _udp["refreshing"] = True
+        threading.Thread(target=refresh_udp_port, daemon=True, name="udp-check").start()
+    return _udp["port"]
+
+
+def send_udp(text, port):
+    _udp_socket.sendto(text.encode("ascii"), (_esp32_host, port))
+
+
 def drive(left, right, ms, source=None):
-    """Drives with separate side speeds, falling back to straight/spin commands on older firmware."""
+    """Drives with separate side speeds: UDP when available, else HTTP, else straight/spin commands."""
     global _drive_missing_since
     if left == 0 and right == 0:
         return send_stop(source)
+    port = udp_port()
+    if port:
+        try:
+            send_udp(f"DRIVE {left} {right} {ms}", port)
+            return 200, b'{"ok":true,"via":"udp"}', "application/json"
+        except OSError as error:
+            print(f"ESP32 UDP send failed ({error}); using HTTP")
     if _drive_missing_since is None or time.monotonic() - _drive_missing_since > DRIVE_RECHECK_SECONDS:
         status, body, content_type = send_drive(left, right, ms, source)
         if status != 404:
@@ -77,6 +126,13 @@ def show_lcd(line1, line2):
 
 
 def send_stop(source=None):
+    """Stops the rover. Sent over UDP first (fastest), then over HTTP (confirmed delivery)."""
+    port = udp_port()
+    if port:
+        try:
+            send_udp("STOP", port)
+        except OSError:
+            pass
     return esp32_request("/api/stop" + ("?source=" + source if source else ""), "POST")
 
 
