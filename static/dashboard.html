@@ -103,6 +103,62 @@ li button{min-height:30px;font-size:11px;color:var(--red);border-color:#6a2020}
 .stick{position:absolute;width:64px;aspect-ratio:1;left:50%;top:50%;transform:translate(-50%,-50%);border-radius:50%;z-index:1;pointer-events:none;
   background:radial-gradient(circle at 35% 35%,#8dffba,var(--green-mid) 45%,#0b5a2e);box-shadow:0 0 16px #3dff8a88}
 
+/* GTA driving mode */
+.gta{margin-top:12px}
+.gta-hud{display:flex;align-items:flex-end;justify-content:center;gap:18px;margin:6px 0 12px;font-weight:700;letter-spacing:.08em}
+.gta-speed{font-size:44px;line-height:1;color:var(--green);text-shadow:0 0 12px #3dff8a66;min-width:3ch;text-align:right}
+.gta-unit{font-size:12px;color:var(--muted);margin-bottom:6px}
+.gta-gear{font-size:28px;line-height:1;padding:4px 10px;border:1px solid var(--green-dim);border-radius:3px;color:var(--green)}
+.gta-gear.reverse{color:var(--amber);border-color:var(--amber)}
+.gta-steer{position:relative;height:6px;background:var(--panel-2);border:1px solid var(--line);border-radius:3px;margin-bottom:12px}
+.gta-steer i{position:absolute;top:-4px;left:50%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+.gta-pad{display:grid;grid-template-columns:1fr 1fr 12px 1fr 1fr;gap:8px}
+.gta-pad button{min-height:64px;font-size:14px;touch-action:none;user-select:none}
+.gta-pad button.held{background:var(--green);color:#021208}
+.gta-pad .brake.held,.gta-brake.held{background:var(--red);border-color:var(--red);color:#fff}
+.gta-brake{width:100%;margin-top:8px;min-height:44px;color:var(--red);border-color:#6a2020;touch-action:none}
+
+/* Full-screen phone controller in GTA mobile style: the camera fills the screen and
+   round see-through buttons sit under the thumbs, glowing Vice City pink when held. */
+.controller-ui{display:none}
+body.controller{overflow:hidden}
+body.controller .frame{position:fixed;inset:0;z-index:20;border:0;border-radius:0;box-shadow:none;animation:none}
+body.controller .frame::after,body.controller .corner,body.controller .hud{display:none}
+body.controller .camera{width:100vw;height:100vh;aspect-ratio:auto;object-fit:cover}
+body.controller .stopbar,body.controller .topbar{display:none}
+body.controller .controller-ui{display:block;position:fixed;inset:0;z-index:21;pointer-events:none;
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;font-family:"Arial Black",Impact,sans-serif}
+.controller-ui>*{pointer-events:auto;position:absolute}
+.cbtn{touch-action:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  width:86px;height:86px;border-radius:50%;padding:0;font:inherit;font-size:30px;line-height:1;letter-spacing:0;
+  color:#fff;background:radial-gradient(circle at 50% 40%,#ffffff2e,#00000059 70%);border:3px solid #ffffffd9;
+  text-shadow:0 2px 3px #000;box-shadow:0 3px 10px #0009;transition:transform .06s,background .06s}
+.cbtn small{font-size:10px;letter-spacing:.12em;color:#ffffffd9;margin:0}
+.cbtn.held{transform:scale(.93);border-color:#ff4fa3;background:radial-gradient(circle,#ff4fa3cc,#ff4fa355 70%);
+  box-shadow:0 0 22px #ff4fa3}
+.cbtn.gas{width:104px;height:104px}
+.cbtn.brake.held{border-color:#ff3b3b;background:radial-gradient(circle,#ff3b3bcc,#ff3b3b55 70%);box-shadow:0 0 22px #ff3b3b}
+.cbtn.handbrake{width:64px;height:64px;font-size:13px}
+.cbtn.handbrake.held{border-color:#2de2e6;background:radial-gradient(circle,#2de2e6cc,#2de2e655 70%);box-shadow:0 0 22px #2de2e6}
+.c-left{left:max(22px,env(safe-area-inset-left));bottom:20px;display:flex;gap:18px;align-items:flex-end}
+.c-right{right:max(22px,env(safe-area-inset-right));bottom:20px;display:grid;
+  grid-template-columns:auto auto;grid-template-rows:auto auto;gap:10px 14px;align-items:end;justify-items:center}
+.c-right .handbrake{grid-column:1;grid-row:1}
+.c-right .brake{grid-column:1;grid-row:2}
+.c-right .gas{grid-column:2;grid-row:1 / span 2}
+.c-stop{top:12px;left:max(14px,env(safe-area-inset-left));min-height:40px;padding:0 16px;font:inherit;font-size:13px;
+  letter-spacing:.08em;color:#fff;background:#c81e1ee6;border:2px solid #fff;border-radius:20px;text-shadow:0 1px 2px #000}
+.c-exit{top:12px;left:calc(max(14px,env(safe-area-inset-left)) + 104px);min-height:40px;padding:0 14px;font:inherit;
+  font-size:12px;color:#fff;background:#0000008c;border:2px solid #ffffffb3;border-radius:20px}
+.c-hud{top:8px;right:max(16px,env(safe-area-inset-right));display:flex;align-items:baseline;gap:8px;
+  font-style:italic;text-shadow:2px 2px 0 #000,-1px -1px 0 #000,1px -1px 0 #000,-1px 1px 0 #000}
+.c-hud #cSpeed{font-size:40px;color:#7dff6b;letter-spacing:.04em}
+.c-hud .unit{font-size:14px;color:#fff}
+.c-hud #cGear{font-size:30px;color:#2de2e6;border:0;padding:0}
+.c-hud #cGear.reverse{color:#ff4fa3}
+.c-tip{bottom:8px;left:50%;transform:translateX(-50%);font-size:10px;letter-spacing:.1em;color:#ffffffa6;
+  text-shadow:0 1px 2px #000;pointer-events:none;white-space:nowrap}
+
 /* Emergency stop */
 .stopbar{position:fixed;left:0;right:0;bottom:0;z-index:6;padding:12px 16px;background:#030605f0;border-top:1px solid var(--line);text-align:center}
 .stop{min-height:50px;width:min(100%,380px);font-size:15px;font-weight:700;letter-spacing:.2em;color:#fff;background:#b01d1d;border:1px solid var(--red);
@@ -203,6 +259,7 @@ li button{min-height:30px;font-size:11px;color:var(--red);border-color:#6a2020}
       <div class="row" style="margin-top:10px">
         <button id="modeDpad" class="secondary">D-pad</button>
         <button id="modeJoystick" class="secondary">Joystick</button>
+        <button id="modeGta" class="secondary">GTA</button>
       </div>
       <div id="dpad" class="grid">
         <span></span><button data-move="FORWARD">&#9650;</button><span></span>
@@ -210,11 +267,42 @@ li button{min-height:30px;font-size:11px;color:var(--red);border-color:#6a2020}
         <span></span><button data-move="BACKWARD">&#9660;</button><span></span>
       </div>
       <div class="joystick" id="joystick" aria-label="Rover navigation joystick"><div class="stick" id="stick"></div></div>
+      <div class="gta" id="gta">
+        <div class="gta-hud"><span class="gta-speed" id="gtaSpeed">0</span><span class="gta-unit">% POWER</span><span class="gta-gear" id="gtaGear">N</span></div>
+        <div class="gta-steer"><i id="gtaSteer"></i></div>
+        <div class="gta-pad">
+          <button data-gta="left" aria-label="Steer left">&#9664;</button>
+          <button data-gta="right" aria-label="Steer right">&#9654;</button>
+          <span></span>
+          <button data-gta="brake" class="brake">Brake<br>/ Rev</button>
+          <button data-gta="gas">Gas</button>
+        </div>
+        <button class="gta-brake" data-gta="handbrake">Handbrake (Space)</button>
+        <button id="gtaController" style="width:100%;margin-top:8px">&#128241; Full-screen phone controller</button>
+        <small>Drive like GTA: W / &#8593; gas, S / &#8595; brake then reverse, A D / &#8592; &#8594; steer, Space handbrake. Speed builds up while you hold gas and coasts down when you let go; steering only works while moving. A game controller also works: right trigger gas, left trigger brake, left stick steer, A / &#10005; handbrake.</small>
+        <small id="gtaPad"></small>
+      </div>
     </section>
   </aside>
 </main>
 
 <div class="stopbar"><button class="stop" id="stopAll">&#9632; Emergency stop</button></div>
+
+<div class="controller-ui" id="controllerUi" aria-label="Phone controller">
+  <button class="c-stop" id="cStop">&#9632; STOP</button>
+  <button class="c-exit" id="cExit">EXIT</button>
+  <div class="c-hud"><span id="cSpeed">000</span><span class="unit">%</span><span id="cGear">N</span></div>
+  <div class="c-left">
+    <button class="cbtn" data-gta="left" aria-label="Steer left">&#9664;</button>
+    <button class="cbtn" data-gta="right" aria-label="Steer right">&#9654;</button>
+  </div>
+  <div class="c-right">
+    <button class="cbtn handbrake" data-gta="handbrake" aria-label="Handbrake">HB</button>
+    <button class="cbtn brake" data-gta="brake" aria-label="Brake and reverse">&#9660;<small>BRAKE</small></button>
+    <button class="cbtn gas" data-gta="gas" aria-label="Gas">&#9650;<small>GAS</small></button>
+  </div>
+  <div class="c-tip">HOLD GAS + STEER TOGETHER</div>
+</div>
 
 <script>
 const $ = selector => document.querySelector(selector);
@@ -270,15 +358,21 @@ document.querySelectorAll('[data-move]').forEach(button => {
 });
 $('#stopAll').addEventListener('click', stop);
 
+let driveMode = 'joystick';
 function setMode(mode) {
+  driveMode = mode;
   $('#dpad').style.display = mode === 'dpad' ? 'grid' : 'none';
   joystick.style.display = mode === 'joystick' ? 'block' : 'none';
+  $('#gta').style.display = mode === 'gta' ? 'block' : 'none';
   $('#modeDpad').classList.toggle('active', mode === 'dpad');
   $('#modeJoystick').classList.toggle('active', mode === 'joystick');
+  $('#modeGta').classList.toggle('active', mode === 'gta');
+  if (mode === 'gta') startGta(); else stopGta();
+  if (typeof updateAutoController === 'function') updateAutoController();
 }
 $('#modeDpad').addEventListener('click', () => { stop(); setMode('dpad'); });
 $('#modeJoystick').addEventListener('click', () => { stop(); setMode('joystick'); });
-setMode('joystick');
+$('#modeGta').addEventListener('click', () => { stop(); setMode('gta'); });
 
 // Joystick: pointer movement only updates the stick position. Commands go out on a
 // fixed tick, and the dead zone sends a single stop rather than one per tick.
@@ -332,6 +426,178 @@ joystick.addEventListener('pointerup', releaseJoystick);
 joystick.addEventListener('pointercancel', releaseJoystick);
 window.addEventListener('blur', releaseJoystick);
 document.addEventListener('visibilitychange', () => { if (document.hidden) releaseJoystick(); });
+
+// GTA mode: car-style driving like GTA Vice City. Holding gas builds speed, letting go
+// coasts, brake slows down and then reverses, steering bends the path while moving
+// (it cannot turn on the spot, like a car), and the handbrake stops at once.
+// Input comes from the keyboard, the on-screen buttons (also the full-screen phone
+// controller) and game controllers; triggers and the stick are analog.
+const GTA = {
+  tickMs: 120, commandMs: 400,          // commands outlast the tick, so motion is continuous
+  accel: 0.9, brake: 2.5, drag: 0.7,    // speed change per second (1 = the speed limit)
+  reverseMax: 0.5, steerRate: 5, steerMix: 0.7, stickDeadZone: 0.15,
+  minPower: 60,                         // below this the motors do not turn, so start from here
+};
+const gtaKeys = {gas: false, brake: false, left: false, right: false, handbrake: false};
+let gtaSpeed = 0, gtaSteer = 0, gtaTimer = null, gtaLast = 0, gtaMoving = false, gtaPadHandbrake = false;
+const GTA_KEYMAP = {w: 'gas', arrowup: 'gas', s: 'brake', arrowdown: 'brake', a: 'left', arrowleft: 'left',
+                    d: 'right', arrowright: 'right', ' ': 'handbrake'};
+
+function gamepad() {
+  return [...(navigator.getGamepads ? navigator.getGamepads() : [])].find(pad => pad && pad.connected);
+}
+function handbrakeNow() {
+  gtaSpeed = 0;
+  if (gtaMoving) { gtaMoving = false; stop(); }
+}
+function gtaInputs() {
+  // Keys and buttons are 0 or 1; a game controller adds analog triggers and stick.
+  const input = {gas: gtaKeys.gas ? 1 : 0, brake: gtaKeys.brake ? 1 : 0,
+                 steer: (gtaKeys.right ? 1 : 0) - (gtaKeys.left ? 1 : 0), handbrake: gtaKeys.handbrake};
+  const pad = gamepad();
+  if (pad) {
+    input.gas = Math.max(input.gas, pad.buttons[7] ? pad.buttons[7].value : 0);
+    input.brake = Math.max(input.brake, pad.buttons[6] ? pad.buttons[6].value : 0);
+    const x = pad.axes[0] || 0;
+    if (Math.abs(x) > GTA.stickDeadZone) input.steer = x;
+    const padHandbrake = !!((pad.buttons[0] && pad.buttons[0].pressed) || (pad.buttons[1] && pad.buttons[1].pressed));
+    if (padHandbrake && !gtaPadHandbrake) handbrakeNow();
+    gtaPadHandbrake = padHandbrake;
+    input.handbrake = input.handbrake || padHandbrake;
+  }
+  return input;
+}
+function gtaTick() {
+  const now = performance.now(), dt = Math.min(0.3, (now - gtaLast) / 1000);
+  gtaLast = now;
+  const input = gtaInputs();
+  if (input.handbrake) {
+    gtaSpeed = 0;
+  } else if (input.gas > 0.05 && input.brake < 0.05) {
+    const target = input.gas;  // a light press on an analog trigger drives slower
+    if (gtaSpeed < 0) gtaSpeed = Math.min(0, gtaSpeed + GTA.brake * dt);
+    else gtaSpeed = gtaSpeed < target ? Math.min(target, gtaSpeed + GTA.accel * dt) : Math.max(target, gtaSpeed - GTA.drag * dt);
+  } else if (input.brake > 0.05 && input.gas < 0.05) {
+    // Brake while rolling forward; once stopped, the same control reverses.
+    gtaSpeed = gtaSpeed > 0.02 ? Math.max(0, gtaSpeed - GTA.brake * input.brake * dt)
+      : Math.max(-GTA.reverseMax * input.brake, gtaSpeed - GTA.accel * dt);
+  } else {
+    gtaSpeed = Math.sign(gtaSpeed) * Math.max(0, Math.abs(gtaSpeed) - GTA.drag * dt);  // coast
+  }
+  gtaSteer += Math.max(-GTA.steerRate * dt, Math.min(GTA.steerRate * dt, input.steer - gtaSteer));
+
+  const shown = Math.round(Math.abs(gtaSpeed) * 100);
+  const gear = gtaSpeed > 0.02 ? 'D' : gtaSpeed < -0.02 ? 'R' : 'N';
+  for (const [speedId, gearId] of [['#gtaSpeed', '#gtaGear'], ['#cSpeed', '#cGear']]) {
+    $(speedId).textContent = speedId === '#cSpeed' ? String(shown).padStart(3, '0') : shown;
+    $(gearId).textContent = gear;
+    $(gearId).classList.toggle('reverse', gear === 'R');
+  }
+  $('#gtaSteer').style.left = `${50 + gtaSteer * 45}%`;
+
+  if (Math.abs(gtaSpeed) < 0.03) {
+    if (input.gas < 0.05 && input.brake < 0.05) gtaSpeed = 0;
+    if (gtaMoving) { gtaMoving = false; stop(); }
+    return;
+  }
+  gtaMoving = true;
+  // Map speed onto the range where the motors actually move, so gas responds at once.
+  const floor = Math.min(GTA.minPower, speedLimit());
+  const base = Math.sign(gtaSpeed) * (floor + (speedLimit() - floor) * Math.abs(gtaSpeed));
+  // Like a car, the turn scales with speed; in reverse the nose swings the other way.
+  const turn = gtaSteer * GTA.steerMix * Math.abs(base);
+  const clamp = v => Math.max(-255, Math.min(255, Math.round(v)));
+  drive(clamp(base + turn), clamp(base - turn), GTA.commandMs);
+}
+function resetGta() {
+  Object.keys(gtaKeys).forEach(key => { gtaKeys[key] = false; });
+  document.querySelectorAll('[data-gta]').forEach(button => button.classList.remove('held'));
+  gtaSpeed = 0; gtaSteer = 0;
+  if (gtaMoving) { gtaMoving = false; stop(); }
+}
+function startGta() {
+  if (gtaTimer) return;
+  gtaLast = performance.now();
+  gtaTimer = setInterval(gtaTick, GTA.tickMs);
+}
+function stopGta() {
+  clearInterval(gtaTimer); gtaTimer = null;
+  resetGta();
+}
+function setGtaKey(key, down) {
+  if (key === 'handbrake' && down && !gtaKeys.handbrake) handbrakeNow();
+  if (down && !gtaKeys[key] && navigator.vibrate) navigator.vibrate(8);
+  gtaKeys[key] = down;
+  document.querySelectorAll(`[data-gta="${key}"]`).forEach(button => button.classList.toggle('held', down));
+}
+function gtaKeyEvent(event, down) {
+  if (!gtaTimer || event.ctrlKey || event.metaKey || event.altKey) return;
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+  const key = GTA_KEYMAP[event.key.toLowerCase()];
+  if (!key) return;
+  event.preventDefault();  // keep arrows and Space from scrolling the page
+  setGtaKey(key, down);
+}
+document.addEventListener('keydown', event => gtaKeyEvent(event, true));
+document.addEventListener('keyup', event => gtaKeyEvent(event, false));
+document.querySelectorAll('[data-gta]').forEach(button => {
+  const key = button.dataset.gta;
+  button.addEventListener('pointerdown', event => { button.setPointerCapture(event.pointerId); setGtaKey(key, true); });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(type => button.addEventListener(type, () => setGtaKey(key, false)));
+  button.addEventListener('contextmenu', event => event.preventDefault());  // no long-press menu on phones
+});
+window.addEventListener('blur', () => { if (gtaTimer) resetGta(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && gtaTimer) resetGta(); });
+
+// Game controllers: shown when connected; losing one mid-drive stops the rover.
+function showGamepad() {
+  const pad = gamepad();
+  $('#gtaPad').textContent = pad ? `\u{1F3AE} Controller connected: ${pad.id.slice(0, 40)}` : '';
+}
+window.addEventListener('gamepadconnected', showGamepad);
+window.addEventListener('gamepaddisconnected', () => { showGamepad(); if (gtaTimer) resetGta(); });
+
+// Full-screen phone controller: the live camera fills the screen and the GTA controls
+// sit under the thumbs. Android also goes full screen and locks to landscape.
+async function enterController() {
+  setMode('gta');
+  document.body.classList.add('controller');
+  try {
+    await document.documentElement.requestFullscreen({navigationUI: 'hide'});
+    await screen.orientation.lock('landscape');
+  } catch (e) {}  // iPhones do not allow this from a web page: turn the phone sideways
+}
+function exitController() {
+  autoController = false;
+  document.body.classList.remove('controller');
+  if (phoneLandscape.matches) setMode('joystick');  // otherwise the sideways phone would reopen it
+  resetGta();
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+$('#gtaController').addEventListener('click', enterController);
+
+// On a phone held sideways, GTA mode shows the controller by itself; back to portrait
+// shows the normal dashboard. Laptops keep GTA as a panel on the dashboard.
+const phoneLandscape = matchMedia('(pointer: coarse) and (orientation: landscape) and (max-height: 540px)');
+let autoController = false;
+function updateAutoController() {
+  const inController = document.body.classList.contains('controller');
+  if (driveMode === 'gta' && phoneLandscape.matches && !inController) {
+    document.body.classList.add('controller');
+    autoController = true;
+  } else if (autoController && inController && !(driveMode === 'gta' && phoneLandscape.matches)) {
+    document.body.classList.remove('controller');
+    autoController = false;
+    resetGta();
+  }
+}
+phoneLandscape.addEventListener('change', updateAutoController);
+$('#cExit').addEventListener('click', exitController);
+$('#cStop').addEventListener('click', () => { resetGta(); stop(); });
+document.addEventListener('fullscreenchange', () => {
+  if (!document.fullscreenElement && document.body.classList.contains('controller')) exitController();
+});
+setMode('joystick');
 
 // Follow mode and faces.
 $('#followStart').addEventListener('click', () =>
@@ -520,7 +786,7 @@ $('#modeDetect').addEventListener('click', () => setAlertMode('detection'));
 
 async function refreshVision() {
   try {
-    const data = await (await fetch('/api/vision')).json();
+    const data = await (await fetch('/api/vision', {signal: AbortSignal.timeout(3000)})).json();
     const v = data.vision;
     setChip('#chipCam', data.camera.online ? 'ok' : 'bad', data.camera.online ? 'Camera' : 'Camera off');
     $('#visionControls').hidden = !v;
@@ -556,22 +822,41 @@ async function refreshVision() {
   }
 }
 
+// Location shown while the GPS module has no fix (ROVER_LOCATION on the Pi).
+const ROVER_LOCATION = '{{ROVER_LOCATION}}'.split(',').map(Number);
+function formatCoordinates(lat, lon, digits) {
+  return `${Math.abs(lat).toFixed(digits)}\u00B0 ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(digits)}\u00B0 ${lon >= 0 ? 'E' : 'W'}`;
+}
+function showLocation(extra) {
+  $('#gps').innerHTML = `LOCATION<br>${formatCoordinates(ROVER_LOCATION[0], ROVER_LOCATION[1], 5)}` + (extra ? `<br>${extra}` : '');
+}
 async function refreshGps() {
   try {
-    const response = await fetch('/api/status');
+    const response = await fetch('/api/status', {signal: AbortSignal.timeout(3000)});
     if (!response.ok) throw new Error(response.statusText);
     const g = (await response.json()).gps;
     setChip('#chipLink', 'ok', 'Rover link');
-    $('#gps').innerHTML = g.fix
-      ? `GPS FIX · ${g.satellites} satellites<br>LAT ${g.latitude.toFixed(6)}<br>LON ${g.longitude.toFixed(6)}<br>ALT ${g.altitude.toFixed(1)} m`
-      : 'GPS: waiting for fix';
+    if (g.fix) {
+      $('#gps').innerHTML = `GPS FIX \u00B7 ${g.satellites} satellites<br>${formatCoordinates(g.latitude, g.longitude, 5)}<br>ALT ${g.altitude.toFixed(1)} m`;
+    } else {
+      showLocation();
+    }
   } catch (e) {
     setChip('#chipLink', 'bad', 'Rover link');
-    $('#gps').textContent = 'ESP32 connection lost';
+    showLocation('ESP32 connection lost');
   }
 }
-setInterval(refreshGps, 1000); refreshGps();
-setInterval(refreshVision, 300); refreshVision();
+// Poll one request at a time: the next starts only after the last finished (or timed
+// out after 3 s). With a fixed timer, an unreachable Pi made requests pile up until the
+// browser ran out of connections, and they then all fired at once when the link returned.
+async function poll(refresh, intervalMs) {
+  for (;;) {
+    await refresh();
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+}
+poll(refreshGps, 1000);
+poll(refreshVision, 300);
 </script>
 </body>
 </html>

@@ -341,6 +341,47 @@ speeds, so movement is smooth. Release the stick, move it to the
 center, switch browser tabs, or press `STOP` to stop the ESP32. The D-pad
 uses the same speed box as the joystick.
 
+## Location
+
+The Telemetry panel shows the rover's location. While the GPS module has no
+satellite fix (for example indoors) it shows `ROVER_LOCATION`, which defaults
+to 13.01425° N, 80.19058° E; set it in `/etc/default/rover-dashboard` as
+`ROVER_LOCATION=latitude,longitude` (decimal degrees, south and west
+negative). Once the GPS gets a fix, the live position is shown instead,
+labelled "GPS FIX" with the number of satellites.
+
+## GTA driving mode
+
+The third manual mode, **GTA**, drives like a car in GTA Vice City:
+
+| Key | On screen | Action |
+| --- | --- | --- |
+| W or ↑ | Gas | Speed builds up while held; let go and it coasts down |
+| S or ↓ | Brake / Rev | Brakes; once stopped, reverses (up to half speed) |
+| A D or ← → | ◀ ▶ | Steer; the path bends while moving, more at higher speed |
+| Space | Handbrake | Stops at once |
+
+A game controller (Xbox, PlayStation or generic, by Bluetooth or USB) works
+too: right trigger gas (analog, so a light press drives slowly), left
+trigger brake / reverse, left stick steer, A / ✕ handbrake. The GTA panel
+shows when one is connected, and disconnecting it stops the rover.
+
+**Phone controller:** on a phone, choose GTA mode and turn the phone sideways:
+the dashboard becomes a GTA-mobile-style controller over the live camera,
+with ◀ ▶ steering under the left thumb, ▲ GAS, ▼ BRAKE and HB (handbrake)
+under the right, the power and gear top right, and STOP / EXIT top left.
+Buttons can be held together (gas + steer). Turning back to portrait shows
+the normal dashboard. The **Full-screen phone controller** button opens it
+too, and on Android also hides the browser bars. On a laptop, GTA mode stays
+a panel on the dashboard. It uses the
+same video stream as the dashboard, so it adds no network load.
+
+Like a car it cannot turn on the spot, and in reverse the nose swings the
+other way. The display shows the power (percent of the speed box) and the
+gear (D / N / R). Keys only work while GTA mode is selected and you are not
+typing in a text box. Switching modes, switching browser tabs, the handbrake
+and the emergency STOP all stop the rover.
+
 ## Useful commands
 
 On the Pi:

@@ -17,7 +17,10 @@ from camera import Camera
 from follow import OPERATOR_STOP, FollowController, FollowSettings
 
 with open(os.path.join(config.BASE_DIR, "static", "dashboard.html"), encoding="utf-8") as dashboard_file:
-    DASHBOARD = dashboard_file.read().replace("{{ESP32_URL}}", html.escape(config.ESP32_URL)).encode()
+    DASHBOARD = (dashboard_file.read()
+                 .replace("{{ESP32_URL}}", html.escape(config.ESP32_URL))
+                 .replace("{{ROVER_LOCATION}}", html.escape(config.ROVER_LOCATION))
+                 .encode())
 
 
 class Autopilot:

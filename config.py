@@ -28,6 +28,9 @@ ESP32_URL = os.getenv("ESP32_URL", "http://192.168.50.2").rstrip("/")
 HOST = os.getenv("ROVER_HOST", "0.0.0.0")
 PORT = _int("ROVER_PORT", 8080)
 REQUEST_TIMEOUT = _float("ESP32_TIMEOUT", 3)
+# Rover location shown on the dashboard while the GPS module has no satellite fix,
+# as "latitude,longitude" in decimal degrees (north and east positive).
+ROVER_LOCATION = os.getenv("ROVER_LOCATION", "13.01425,80.19058")
 # ESP32 motion calibration (DISTANCE_MS_PER_CM and TURN_MS_PER_DEGREE in its
 # src/config.h), used to translate curved drives for firmware without /api/drive.
 ESP32_MS_PER_CM = _float("ESP32_MS_PER_CM", 15.3)
