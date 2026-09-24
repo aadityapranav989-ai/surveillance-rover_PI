@@ -7,6 +7,15 @@ This document contains the complete setup, deployment, operation, and
 troubleshooting procedure for the ESP32 + Raspberry Pi rover system.
 Update this file whenever the project workflow changes.
 
+NETWORK CHANGE (2026-09-24)
+---------------------------
+The Raspberry Pi now hosts the rover Wi-Fi "TAPIR" (Pi 192.168.50.1, ESP32
+192.168.50.2, dashboard http://192.168.50.1:8080/). The ESP32 joins it and
+only opens its old "ESP32-Robot" network (192.168.4.1) as a fallback when it
+cannot find TAPIR. Sections below that describe the ESP32-Robot network are
+the old setup; see README.md "Network layout" for switching over
+(scripts/setup_hotspot.sh) and back (scripts/leave_hotspot.sh).
+
 System architecture
 -------------------
 Laptop (vision app, http://127.0.0.1:8090/)

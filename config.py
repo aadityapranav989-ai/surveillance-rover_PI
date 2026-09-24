@@ -24,7 +24,7 @@ def _flag(name, default):
 #   Set ESP32_URL to the Pi gateway, e.g. http://192.168.4.10:8080.
 VISION_ENABLED = _flag("VISION_ENABLED", "0")
 
-ESP32_URL = os.getenv("ESP32_URL", "http://192.168.4.1").rstrip("/")
+ESP32_URL = os.getenv("ESP32_URL", "http://192.168.50.2").rstrip("/")
 HOST = os.getenv("ROVER_HOST", "0.0.0.0")
 PORT = _int("ROVER_PORT", 8080)
 REQUEST_TIMEOUT = _float("ESP32_TIMEOUT", 3)
