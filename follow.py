@@ -5,7 +5,6 @@ from urllib.error import URLError
 
 import esp32
 
-VISION_STALE_AFTER = 1.0
 OPERATOR_STOP = 423  # "Locked": the Pi gateway refuses follow commands after an operator STOP
 
 
@@ -15,7 +14,7 @@ class FollowSettings:
     max_speed: int
     turn_min_speed: int  # turning on the spot, used once close to the person
     turn_max_speed: int
-    steer_gain: int  # wheel speed difference when the person is at the edge of the frame
+    full_steer_offset: float  # offset (fraction of width) at which the curve is at its tightest
     command_ms: int  # each command's run time; outlasts the interval so motion is continuous
     center_enter: float  # when close, start turning on the spot at this offset (fraction of width)
     center_exit: float  # ...and stop once back within this; also the steering dead zone
@@ -24,7 +23,8 @@ class FollowSettings:
     resume_margin: float  # after stopping close to the target, drive again once it shrinks by this fraction
     smoothing: float  # 0..1 weight of each new detection; lower is smoother but slower to react
     max_speed_change: int  # largest speed change between consecutive commands
-    lost_grace: float  # keep going this long when the target is briefly not detected
+    lost_grace: float  # keep driving on the last steering this long when the target is briefly not detected
+    vision_timeout: float  # stop if the newest detection result is older than this
     track_memory: float
     interval: float
 
@@ -117,10 +117,14 @@ class Steering:
         # Ease off when the person is far to one side, so the curve can be tighter.
         sharpness = min(1.0, max(0.0, abs(self.offset) - 0.2) / 0.3)
         base = self._ramp(target * (1 - 0.4 * sharpness))
-        steer = 0.0 if abs(self.offset) < s.center_exit else s.steer_gain * self.offset / 0.5
-        left = max(-255, min(255, round(base + steer)))
-        right = max(-255, min(255, round(base - steer)))
-        return left, right
+        # Skid steering only turns with a large wheel-speed difference, so the side away
+        # from the person ramps up to full turn power while the near side slows down.
+        steer = 0.0
+        if abs(self.offset) >= s.center_exit:
+            steer = min(1.0, (abs(self.offset) - s.center_exit) / (s.full_steer_offset - s.center_exit))
+        outer = round(base + (max(s.turn_max_speed, base) - base) * steer)
+        inner = round(base * (1 - steer))
+        return (outer, inner) if self.offset > 0 else (inner, outer)
 
     def _face_on_the_spot(self):
         s = self.settings
@@ -211,8 +215,8 @@ class FollowController(threading.Thread):
     def _step(self):
         now = self.clock()
         result = self.vision.latest
-        if result is None or now - result.timestamp > VISION_STALE_AFTER:
-            self._hold("waiting for camera")
+        if result is None or now - result.timestamp > self.settings.vision_timeout:
+            self._hold("waiting for camera (vision too slow or stopped)")
             return
         if result.frame_id != self._last_frame:
             # Only new detections move the smoothed target; repeated ticks reuse it.
@@ -231,16 +235,16 @@ class FollowController(threading.Thread):
             self.steering.reset()
             self._hold("searching")
             return
-        if not self._visible:
-            # Briefly not detected: let the current command run on instead of stopping.
-            self.state = "tracking (target briefly hidden)"
-            return
+        # Detections flicker, so while the person is briefly not detected the rover keeps
+        # driving on its last steering (and the yellow box stays) instead of stopping.
         command = self.steering.command()
+        detail = self._describe()
         if command is None:
-            self._hold("reached target")
+            self._hold(f"reached target · {detail}")
             return
         left, right = command
-        self.state = f"tracking (left {left} / right {right})"
+        hidden = "" if self._visible else " · briefly hidden"
+        self.state = f"tracking · {detail} · left {left} / right {right}{hidden}"
         self._moving = True
         if self._send(esp32.drive, left, right, self.settings.command_ms, esp32.AUTO) == OPERATOR_STOP:
             # Someone pressed STOP or drove manually on the Pi dashboard.
@@ -250,6 +254,13 @@ class FollowController(threading.Thread):
             self.steering.reset()
             self.vision.target_box = None
             self.state = "stopped from the Pi dashboard"
+
+    def _describe(self):
+        """The numbers behind a decision, for tuning: target size, offset and vision rate."""
+        offset = self.steering.offset
+        side = "centered" if abs(offset) < 0.03 else f"{abs(offset) * 100:.0f}% {'right' if offset > 0 else 'left'}"
+        fps = getattr(self.vision, "fps", 0) or 0
+        return f"target {self.steering.size * 100:.0f}% tall, {side}, vision {fps:.1f} fps"
 
     def _hold(self, state):
         self.state = state

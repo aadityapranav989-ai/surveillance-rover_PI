@@ -7,10 +7,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from follow import FollowController, FollowSettings, Steering, iou, select_target  # noqa: E402
 from vision import Detection, VisionResult  # noqa: E402
 
-SETTINGS = FollowSettings(min_speed=90, max_speed=150, turn_min_speed=85, turn_max_speed=130,
-                          steer_gain=110, command_ms=600, center_enter=0.15, center_exit=0.06,
+SETTINGS = FollowSettings(min_speed=90, max_speed=150, turn_min_speed=255, turn_max_speed=255,
+                          full_steer_offset=0.3, command_ms=600, center_enter=0.15, center_exit=0.06,
                           stop_body_height=0.8, stop_face_height=0.25, resume_margin=0.12,
-                          smoothing=0.5, max_speed_change=20, lost_grace=0.8, track_memory=3,
+                          smoothing=0.5, max_speed_change=20, lost_grace=0.8, vision_timeout=2.5, track_memory=3,
                           interval=0.25)
 W, H = 640, 480
 
@@ -44,6 +44,15 @@ class SteeringTest(unittest.TestCase):
         self.assertGreater(right, 0, "still moving forward on both sides: a curve, not a spin")
         left, right = steering_for(body_at(0.25, 0.4)).command()
         self.assertGreater(right, left)
+
+    def test_curve_uses_full_turn_power_on_the_outside(self):
+        left, right = steering_for(body_at(0.85, 0.4)).command()  # 35% right: tightest curve
+        self.assertEqual(left, 255, "the far side runs at full turn power")
+        self.assertEqual(right, 0, "the near side stops, so the rover pivots towards the person")
+
+    def test_on_the_spot_turns_use_full_power(self):
+        left, right = steering_for(body_at(0.8, 0.85)).command()
+        self.assertEqual((left, right), (255, -255))
 
     def test_curve_tightens_with_offset(self):
         gentle = steering_for(body_at(0.6, 0.4)).command()
@@ -125,20 +134,33 @@ class FollowControllerTest(unittest.TestCase):
         self.vision.latest = result(persons, frame_id=self.frame, timestamp=self.now)
         self.follow._step()
 
-    def test_brief_detection_gap_does_not_stop(self):
+    def test_brief_detection_gap_keeps_driving(self):
         person = Detection(body_at(0.5, 0.3), 0.9)
         self.tick([person])
-        self.tick([])  # one missed frame
+        self.tick([])  # one missed frame: keeps driving on the last steering
+        self.assertIn("briefly hidden", self.follow.state)
+        self.assertIsNotNone(self.vision.target_box, "the yellow box stays")
         self.tick([person])
-        self.assertEqual(self.sent, ["DRIVE", "DRIVE"])
+        self.assertEqual(self.sent, ["DRIVE", "DRIVE", "DRIVE"])
 
     def test_stops_once_person_is_really_gone(self):
         person = Detection(body_at(0.5, 0.3), 0.9)
         self.tick([person])
-        for _ in range(4):  # 1 s without the person
+        for _ in range(4):  # 1 s without the person; the grace period is 0.8 s
             self.tick([])
-        self.assertEqual(self.sent, ["DRIVE", "STOP"])
+        self.assertEqual(self.sent, ["DRIVE", "DRIVE", "DRIVE", "DRIVE", "STOP"])
         self.assertEqual(self.follow.state, "searching")
+
+    def test_status_shows_the_numbers(self):
+        self.tick([Detection(body_at(0.7, 0.4), 0.9)])
+        self.assertIn("target 40% tall, 20% right", self.follow.state)
+
+    def test_slow_vision_is_tolerated(self):
+        person = Detection(body_at(0.5, 0.3), 0.9)
+        self.tick([person])
+        self.now += 2.0  # vision result is 2 s old: still within the 2.5 s timeout
+        self.follow._step()
+        self.assertNotIn("waiting for camera", self.follow.state)
 
     def test_sends_every_tick_while_tracking(self):
         person = Detection(body_at(0.5, 0.3), 0.9)

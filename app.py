@@ -20,6 +20,7 @@ with open(os.path.join(config.BASE_DIR, "static", "dashboard.html"), encoding="u
     DASHBOARD = (dashboard_file.read()
                  .replace("{{ESP32_URL}}", html.escape(config.ESP32_URL))
                  .replace("{{ROVER_LOCATION}}", html.escape(config.ROVER_LOCATION))
+                 .replace("{{TURN_POWER}}", str(config.TURN_POWER))
                  .encode())
 
 
@@ -265,14 +266,15 @@ def start_vision(camera):
 
     cv2.setNumThreads(config.VISION_THREADS)
     vision = Vision(camera, config.MODELS_DIR, config.FACES_DIR, config.PERSON_CONFIDENCE,
-                    config.FACE_CONFIDENCE, config.FACE_MATCH_THRESHOLD, config.VISION_MAX_FPS)
+                    config.FACE_CONFIDENCE, config.FACE_MATCH_THRESHOLD, config.VISION_MAX_FPS,
+                    config.FACE_EVERY_N_FRAMES)
     camera.annotate = vision.annotate
     follow = FollowController(vision, FollowSettings(
         min_speed=config.FOLLOW_MIN_SPEED,
         max_speed=config.FOLLOW_MAX_SPEED,
         turn_min_speed=config.FOLLOW_TURN_MIN_SPEED,
         turn_max_speed=config.FOLLOW_TURN_MAX_SPEED,
-        steer_gain=config.FOLLOW_STEER_GAIN,
+        full_steer_offset=config.FOLLOW_FULL_STEER_OFFSET,
         command_ms=config.FOLLOW_COMMAND_MS,
         center_enter=config.FOLLOW_CENTER_ENTER,
         center_exit=config.FOLLOW_CENTER_EXIT,
@@ -282,6 +284,7 @@ def start_vision(camera):
         smoothing=config.FOLLOW_SMOOTHING,
         max_speed_change=config.FOLLOW_MAX_SPEED_CHANGE,
         lost_grace=config.FOLLOW_LOST_GRACE,
+        vision_timeout=config.FOLLOW_VISION_TIMEOUT,
         track_memory=config.FOLLOW_TRACK_MEMORY,
         interval=config.FOLLOW_INTERVAL,
     ))

@@ -60,6 +60,9 @@ STREAM_SEND_BUFFER = _int("STREAM_SEND_BUFFER", 16384)
 MODELS_DIR = os.getenv("MODELS_DIR", os.path.join(BASE_DIR, "models"))
 FACES_DIR = os.getenv("FACES_DIR", os.path.join(BASE_DIR, "faces"))
 VISION_MAX_FPS = _float("VISION_MAX_FPS", 8)
+# Run face detection and recognition on every Nth frame only (the slowest step);
+# body detection, which follow mode uses, still runs on every frame.
+FACE_EVERY_N_FRAMES = _int("FACE_EVERY_N_FRAMES", 3)
 # CPU cores OpenCV may use for detection. Left unset, detection grabs every
 # core and the camera thread waits, dropping the stream below 30 fps on a Pi.
 VISION_THREADS = _int("VISION_THREADS", 2)
@@ -91,32 +94,41 @@ SETTINGS_FILE = os.getenv("SETTINGS_FILE", os.path.join(BASE_DIR, "settings.json
 # command interval, so the rover moves continuously instead of stop-start. If
 # the Pi stops sending, the rover still halts within one command.
 FOLLOW_INTERVAL = _float("FOLLOW_INTERVAL", 0.25)
-FOLLOW_COMMAND_MS = _int("FOLLOW_COMMAND_MS", 600)
-FOLLOW_MIN_SPEED = _int("FOLLOW_MIN_SPEED", 90)
-FOLLOW_MAX_SPEED = _int("FOLLOW_MAX_SPEED", 150)
-# While approaching, the rover curves towards the person: the outer side runs
-# up to FOLLOW_STEER_GAIN faster than the inner side when they are at the edge
-# of the frame.
-FOLLOW_STEER_GAIN = _int("FOLLOW_STEER_GAIN", 110)
+FOLLOW_COMMAND_MS = _int("FOLLOW_COMMAND_MS", 700)
+# Motor power while approaching (0-255): faster when the person is further away. Below
+# about 100 a loaded rover barely moves.
+FOLLOW_MIN_SPEED = _int("FOLLOW_MIN_SPEED", 120)
+FOLLOW_MAX_SPEED = _int("FOLLOW_MAX_SPEED", 190)
+# Motor power needed to turn. This skid-steer rover only turns at full power, so
+# turns in every mode (follow, joystick, D-pad, GTA) use TURN_POWER.
+TURN_POWER = _int("TURN_POWER", 255)
+# While approaching, the rover curves towards the person: the far side ramps up to
+# TURN_POWER and the near side slows, reaching the tightest curve when the person
+# is FOLLOW_FULL_STEER_OFFSET (fraction of the frame width) off-center.
+FOLLOW_FULL_STEER_OFFSET = _float("FOLLOW_FULL_STEER_OFFSET", 0.3)
 # Once close, it turns on the spot to keep facing the person.
-FOLLOW_TURN_MIN_SPEED = _int("FOLLOW_TURN_MIN_SPEED", 85)
-FOLLOW_TURN_MAX_SPEED = _int("FOLLOW_TURN_MAX_SPEED", 130)
+FOLLOW_TURN_MIN_SPEED = _int("FOLLOW_TURN_MIN_SPEED", TURN_POWER)
+FOLLOW_TURN_MAX_SPEED = _int("FOLLOW_TURN_MAX_SPEED", TURN_POWER)
 # When close, start turning on the spot once the person is this far off-center
 # (fraction of the frame width), and stop once back within FOLLOW_CENTER_EXIT.
 # FOLLOW_CENTER_EXIT is also the steering dead zone while approaching.
 FOLLOW_CENTER_ENTER = _float("FOLLOW_CENTER_ENTER", 0.15)
 FOLLOW_CENTER_EXIT = _float("FOLLOW_CENTER_EXIT", 0.06)
 # Stop approaching once the target fills this fraction of the frame height,
-# and drive again once it has shrunk by FOLLOW_RESUME_MARGIN of that.
-FOLLOW_STOP_BODY_HEIGHT = _float("FOLLOW_STOP_BODY_HEIGHT", 0.8)
+# and drive again once it has shrunk by FOLLOW_RESUME_MARGIN of that. With a
+# mast-mounted webcam (about 45 degrees vertical view) 0.9 stops about 2 m from
+# a standing adult; the status line shows the current size to tune this.
+FOLLOW_STOP_BODY_HEIGHT = _float("FOLLOW_STOP_BODY_HEIGHT", 0.9)
 FOLLOW_STOP_FACE_HEIGHT = _float("FOLLOW_STOP_FACE_HEIGHT", 0.25)
-FOLLOW_RESUME_MARGIN = _float("FOLLOW_RESUME_MARGIN", 0.12)
+FOLLOW_RESUME_MARGIN = _float("FOLLOW_RESUME_MARGIN", 0.1)
 # Weight of each new detection when smoothing the target position (0..1).
 FOLLOW_SMOOTHING = _float("FOLLOW_SMOOTHING", 0.5)
 # Largest speed change between consecutive commands, so the rover eases in and out.
 FOLLOW_MAX_SPEED_CHANGE = _int("FOLLOW_MAX_SPEED_CHANGE", 20)
-# Keep going this long when the person is briefly not detected.
-FOLLOW_LOST_GRACE = _float("FOLLOW_LOST_GRACE", 0.8)
+# Keep driving on the last steering this long when the person is briefly not detected.
+FOLLOW_LOST_GRACE = _float("FOLLOW_LOST_GRACE", 1.5)
+# Stop if the newest detection result is older than this (vision running too slowly).
+FOLLOW_VISION_TIMEOUT = _float("FOLLOW_VISION_TIMEOUT", 2.5)
 # Keep tracking a recognized person's body for this long after their face
 # was last recognized (for example when they turn away).
 FOLLOW_TRACK_MEMORY = _float("FOLLOW_TRACK_MEMORY", 3)

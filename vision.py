@@ -205,7 +205,7 @@ class Vision(threading.Thread):
     """Runs person detection and face recognition on the newest camera frame."""
 
     def __init__(self, camera, models_dir, faces_dir, person_confidence, face_confidence,
-                 face_threshold, max_fps):
+                 face_threshold, max_fps, face_every=3):
         super().__init__(daemon=True, name="vision")
         self.camera = camera
         self.min_period = 1.0 / max_fps if max_fps > 0 else 0
@@ -219,6 +219,12 @@ class Vision(threading.Thread):
         else:
             print("Vision: face models missing; run scripts/download_models.sh to enable face recognition")
         self.fps = 0.0
+        # Face recognition is the slowest step, so it runs on every Nth frame and the other
+        # frames reuse its result; body detection (what follow mode steers by) runs every frame.
+        self.face_every = max(1, face_every)
+        self._frames = 0
+        self._recent_faces = []
+        self.timing = {"person_ms": 0.0, "faces_ms": 0.0}
         self.target_box = None  # set by the follow controller, drawn on the stream
         self.on_result = None  # called with each VisionResult, e.g. by the alert monitor
         self._latest = None
@@ -256,13 +262,23 @@ class Vision(threading.Thread):
     def process(self, frame_id, frame):
         height, width = frame.shape[:2]
         result = VisionResult(frame_id, time.monotonic(), width, height)
+        started = time.monotonic()
         result.persons = self.persons.detect(frame)
+        after_persons = time.monotonic()
+        self._measure("person_ms", after_persons - started)
         if self.faces is not None:
-            for row in self.faces.detect(frame):
-                name, similarity = self.database.identify(self.faces.embed(frame, row))
-                box = _clip_box(row[0], row[1], row[0] + row[2], row[1] + row[3], width, height)
-                result.faces.append(Detection(box, float(row[14]), name, similarity))
+            if self._frames % self.face_every == 0:
+                faces = []
+                for row in self.faces.detect(frame):
+                    name, similarity = self.database.identify(self.faces.embed(frame, row))
+                    box = _clip_box(row[0], row[1], row[0] + row[2], row[1] + row[3], width, height)
+                    faces.append(Detection(box, float(row[14]), name, similarity))
+                self._recent_faces = faces
+                self._measure("faces_ms", time.monotonic() - after_persons)
+            result.faces = list(self._recent_faces)
+        self._frames += 1
         # A recognized face labels the body it sits in, so the body can be followed.
+        # (Faces may be from a frame or two ago, which is close enough for this.)
         for face in result.faces:
             if face.name is None:
                 continue
@@ -290,11 +306,17 @@ class Vision(threading.Thread):
             return 0, "more than one face in view"
         return self.database.enroll(name, frame, faces[0]), None
 
+    def _measure(self, key, seconds):
+        milliseconds = seconds * 1000
+        previous = self.timing[key]
+        self.timing[key] = milliseconds if previous == 0 else 0.8 * previous + 0.2 * milliseconds
+
     def status(self):
         result = self.latest
         fresh = result is not None and time.monotonic() - result.timestamp < 2
         return {
             "fps": round(self.fps, 1) if fresh else 0,
+            "timing": {key: round(value) for key, value in self.timing.items()},
             "person_backend": self.persons.backend,
             "face_recognition": self.database is not None,
             "persons": [p.to_json() for p in result.persons] if fresh else [],
