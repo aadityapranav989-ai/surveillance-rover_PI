@@ -786,7 +786,7 @@ $('#modeDetect').addEventListener('click', () => setAlertMode('detection'));
 
 async function refreshVision() {
   try {
-    const data = await (await fetch('/api/vision')).json();
+    const data = await (await fetch('/api/vision', {signal: AbortSignal.timeout(3000)})).json();
     const v = data.vision;
     setChip('#chipCam', data.camera.online ? 'ok' : 'bad', data.camera.online ? 'Camera' : 'Camera off');
     $('#visionControls').hidden = !v;
@@ -822,22 +822,41 @@ async function refreshVision() {
   }
 }
 
+// Location shown while the GPS module has no fix (ROVER_LOCATION on the Pi).
+const ROVER_LOCATION = '{{ROVER_LOCATION}}'.split(',').map(Number);
+function formatCoordinates(lat, lon, digits) {
+  return `${Math.abs(lat).toFixed(digits)}\u00B0 ${lat >= 0 ? 'N' : 'S'}, ${Math.abs(lon).toFixed(digits)}\u00B0 ${lon >= 0 ? 'E' : 'W'}`;
+}
+function showLocation(extra) {
+  $('#gps').innerHTML = `LOCATION<br>${formatCoordinates(ROVER_LOCATION[0], ROVER_LOCATION[1], 5)}` + (extra ? `<br>${extra}` : '');
+}
 async function refreshGps() {
   try {
-    const response = await fetch('/api/status');
+    const response = await fetch('/api/status', {signal: AbortSignal.timeout(3000)});
     if (!response.ok) throw new Error(response.statusText);
     const g = (await response.json()).gps;
     setChip('#chipLink', 'ok', 'Rover link');
-    $('#gps').innerHTML = g.fix
-      ? `GPS FIX · ${g.satellites} satellites<br>LAT ${g.latitude.toFixed(6)}<br>LON ${g.longitude.toFixed(6)}<br>ALT ${g.altitude.toFixed(1)} m`
-      : 'GPS: waiting for fix';
+    if (g.fix) {
+      $('#gps').innerHTML = `GPS FIX \u00B7 ${g.satellites} satellites<br>${formatCoordinates(g.latitude, g.longitude, 5)}<br>ALT ${g.altitude.toFixed(1)} m`;
+    } else {
+      showLocation();
+    }
   } catch (e) {
     setChip('#chipLink', 'bad', 'Rover link');
-    $('#gps').textContent = 'ESP32 connection lost';
+    showLocation('ESP32 connection lost');
   }
 }
-setInterval(refreshGps, 1000); refreshGps();
-setInterval(refreshVision, 300); refreshVision();
+// Poll one request at a time: the next starts only after the last finished (or timed
+// out after 3 s). With a fixed timer, an unreachable Pi made requests pile up until the
+// browser ran out of connections, and they then all fired at once when the link returned.
+async function poll(refresh, intervalMs) {
+  for (;;) {
+    await refresh();
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+}
+poll(refreshGps, 1000);
+poll(refreshVision, 300);
 </script>
 </body>
 </html>

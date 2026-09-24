@@ -341,6 +341,15 @@ speeds, so movement is smooth. Release the stick, move it to the
 center, switch browser tabs, or press `STOP` to stop the ESP32. The D-pad
 uses the same speed box as the joystick.
 
+## Location
+
+The Telemetry panel shows the rover's location. While the GPS module has no
+satellite fix (for example indoors) it shows `ROVER_LOCATION`, which defaults
+to 13.01425° N, 80.19058° E; set it in `/etc/default/rover-dashboard` as
+`ROVER_LOCATION=latitude,longitude` (decimal degrees, south and west
+negative). Once the GPS gets a fix, the live position is shown instead,
+labelled "GPS FIX" with the number of satellites.
+
 ## GTA driving mode
 
 The third manual mode, **GTA**, drives like a car in GTA Vice City:
