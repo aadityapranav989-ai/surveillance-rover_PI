@@ -5,7 +5,7 @@
 #
 # Then open http://127.0.0.1:8090/ on the laptop.
 param(
-    [string]$PiUrl = "http://192.168.4.10:8080",
+    [string]$PiUrl = "http://192.168.50.1:8080",
     [int]$Port = 8090
 )
 $ErrorActionPreference = "Stop"

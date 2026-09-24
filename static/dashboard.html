@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Rover Sentry</title>
+<title>T.A.P.I.R</title>
 <style>
 /* Security-console theme. System fonts only: the rover network has no internet. */
 :root{
@@ -120,7 +120,7 @@ li button{min-height:30px;font-size:11px;color:var(--red);border-color:#6a2020}
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><span class="mark"></span>ROVER SENTRY <small>SURVEILLANCE CONSOLE</small></div>
+  <div class="brand"><span class="mark"></span>T.A.P.I.R <small>SURVEILLANCE CONSOLE</small></div>
   <div class="chips">
     <span class="chip" id="chipCam"><i></i>Camera</span>
     <span class="chip" id="chipLink"><i></i>Rover link</span>
@@ -403,7 +403,9 @@ function setAlarmSound(on) {
   if (on && !alarmTimer) { alarmBurst(); alarmTimer = setInterval(alarmBurst, 1800); }
   if (!on && alarmTimer) { clearInterval(alarmTimer); alarmTimer = null; }
 }
-function renderAlerts(a) {
+const DENIED_BANNER_SECONDS = 5;
+let lastDeniedTap = null;
+function renderAlerts(a, r) {
   $('#alertControls').hidden = !a;
   $('#chipMode').hidden = !a;
   if (!a) { document.body.classList.remove('alarm', 'checking'); setAlarmSound(false); return; }
@@ -420,13 +422,27 @@ function renderAlerts(a) {
   document.body.classList.toggle('alarm', state === 'alarm');
   document.body.classList.toggle('checking', state === 'checking');
 
+  // An unauthorised card tapped in the last few seconds (any mode).
+  const tap = r && r.last_tap;
+  const denied = tap && !tap.authorised && !tap.enrolled && tap.age < DENIED_BANNER_SECONDS;
+  if (denied) {
+    const tapKey = `${tap.uid}@${Math.round(Date.now() / 1000 - tap.age)}`;
+    if (tapKey !== lastDeniedTap && tap.age < 2) { tone(220, 0, 0.18); tone(220, 0.25, 0.18); }
+    lastDeniedTap = tapKey;
+  }
+
   const banner = $('#alertBanner'), faces = `${a.faces} unknown face${a.faces === 1 ? '' : 's'} in view`;
-  banner.hidden = !['alarm', 'checking', 'granted'].includes(state);
-  banner.className = 'alert' + (state === 'checking' ? ' warn' : state === 'granted' ? ' ok' : '');
+  banner.hidden = !(denied || ['alarm', 'checking', 'granted'].includes(state));
+  banner.className = 'alert' + (state === 'alarm' || denied ? '' : state === 'checking' ? ' warn' : state === 'granted' ? ' ok' : '');
   $('#alertCountdown').hidden = state !== 'checking';
   if (state === 'alarm') {
-    $('#alertTitle').textContent = '\u26A0 INTRUDER \u2014 NO AUTHORISATION';
-    $('#alertWhen').textContent = `\u00B7 ${faces}`;
+    $('#alertTitle').textContent = '\u26D4 ACCESS DENIED \u2014 INTRUDER DETECTED';
+    $('#alertWhen').textContent = `\u00B7 no RFID card \u00B7 ${faces}`;
+  } else if (denied) {
+    $('#alertTitle').textContent = '\u26D4 ACCESS DENIED';
+    $('#alertWhen').textContent = `\u00B7 card ${tap.uid} is not authorised`
+      + (state === 'checking' ? ` \u00B7 ${a.seconds_left} s left to tap a valid card` : '');
+    if (state === 'checking') $('#alertBar').style.width = `${100 * a.seconds_left / a.auth_timeout}%`;
   } else if (state === 'checking') {
     $('#alertTitle').textContent = '\u26A0 UNKNOWN PERSON \u2014 TAP RFID CARD';
     $('#alertWhen').textContent = `\u00B7 ${a.seconds_left} s left`;
@@ -508,7 +524,7 @@ async function refreshVision() {
     const v = data.vision;
     setChip('#chipCam', data.camera.online ? 'ok' : 'bad', data.camera.online ? 'Camera' : 'Camera off');
     $('#visionControls').hidden = !v;
-    renderAlerts(data.alerts);
+    renderAlerts(data.alerts, data.rfid);
     renderRfid(data.rfid);
     if (!v) {
       // Pi gateway: vision and follow mode run on the laptop.

@@ -25,41 +25,53 @@ role; the Pi runs with vision off (the default).
 
 ## Network layout
 
-The ESP32 creates the `ESP32-Robot` access point at `192.168.4.1`. The Pi and
-the laptop join that Wi-Fi network directly; no router is needed. The Wi-Fi
-password is set in the ESP32 firmware (`src/config.h`) and is not stored in
-this repository.
+The Raspberry Pi hosts the rover Wi-Fi, `TAPIR`. The ESP32 and the laptop
+join it; no router is needed.
 
 ```text
-ESP32 access point: 192.168.4.1
-Raspberry Pi:       192.168.4.10
-Laptop:             DHCP address
+Raspberry Pi (hotspot):  192.168.50.1   dashboard http://192.168.50.1:8080/
+ESP32:                   192.168.50.2   (fixed, set in its firmware)
+Laptop:                  DHCP address from the Pi
+Wi-Fi password:          same as ROVER_WIFI_PASSWORD in the ESP32's src/secrets.h
 ```
 
-Configure the Pi with a fixed Wi-Fi address. First find the active
-connection name:
+Video goes straight from the Pi to the laptop over the Pi's radio, and the
+ESP32 only receives small drive commands (UDP). Earlier, the ESP32 hosted
+the network (`ESP32-Robot`) and relayed every video frame through its small
+radio, so both the video and the controls lagged.
 
-```bash
-nmcli connection show --active
-```
+### Switching the Pi to host the Wi-Fi
 
-Replace `WIFI_CONNECTION_NAME` below with the Wi-Fi connection name:
+1. Flash the ESP32 with the current firmware first. It looks for `TAPIR`;
+   until it finds it, it keeps its own `ESP32-Robot` network open after 30
+   seconds, so the Pi stays connected meanwhile.
+2. On the Pi (from this folder), with the same password as the ESP32's
+   `secrets.h`:
 
-```bash
-sudo nmcli connection modify "WIFI_CONNECTION_NAME" ipv4.method manual ipv4.addresses 192.168.4.10/24 ipv4.gateway 192.168.4.1 ipv4.dns 192.168.4.1
-sudo nmcli connection down "WIFI_CONNECTION_NAME"
-sudo nmcli connection up "WIFI_CONNECTION_NAME"
-hostname -I
-```
+   ```bash
+   sudo nohup bash scripts/setup_hotspot.sh 'WIFI_PASSWORD' > ~/hotspot.log 2>&1 &
+   ```
 
-The video travels over the ESP32's Wi-Fi, which has limited bandwidth. The
-Pi captures from the webcam in its compressed MJPG mode at up to 30 fps and
-queues at most about one frame per viewer (`STREAM_SEND_BUFFER`). When the
-Wi-Fi can't carry every frame, frames are skipped instead of queued, so the
-picture stays live (well under a second behind) rather than drifting
-seconds behind. For a smoother picture on a busy network, lower
-`JPEG_QUALITY` (for example 50) on the Pi. Watch the annotated video on the
-laptop dashboard rather than opening the Pi's stream in extra browsers.
+   An SSH session over Wi-Fi drops at this point. The script creates the
+   hotspot (2.4 GHz, channel 6, WPA2), points the dashboard at the ESP32's
+   new address, and restarts the service. If the hotspot does not come up
+   within 30 seconds, it returns the Pi to the network it was on.
+3. Join the laptop to `TAPIR` and open `http://192.168.50.1:8080/`. SSH is
+   now `ssh pi@192.168.50.1`. Within about 30 seconds the ESP32 joins too;
+   check with `cat ~/hotspot.log` and
+   `journalctl -u rover-dashboard -n 20 --no-pager | grep "drive commands"`
+   (`UDP port 4210` means the Pi reaches the ESP32).
+
+To go back to the old setup: `sudo nohup bash scripts/leave_hotspot.sh > ~/hotspot.log 2>&1 &`.
+
+While the Pi hosts the Wi-Fi it has no Wi-Fi internet; plug in an Ethernet
+cable when it needs to download updates. With Ethernet connected, it also
+shares that internet with the laptop.
+
+The Pi queues at most about one video frame per viewer
+(`STREAM_SEND_BUFFER`), so on a busy network frames are skipped instead of
+piling up, and the picture stays live. For a lighter stream, lower
+`JPEG_QUALITY` (for example 50).
 
 ## Raspberry Pi setup
 
@@ -81,7 +93,7 @@ Create the environment file:
 
 ```bash
 sudo tee /etc/default/rover-dashboard >/dev/null <<'EOF'
-ESP32_URL=http://192.168.4.1
+ESP32_URL=http://192.168.50.2
 CAMERA_DEVICE=/dev/video0
 CAMERA_WIDTH=640
 CAMERA_HEIGHT=480
@@ -101,7 +113,7 @@ sudo systemctl enable --now rover-dashboard
 sudo systemctl status rover-dashboard
 ```
 
-The Pi dashboard at `http://192.168.4.10:8080/` has the raw camera, GPS,
+The Pi dashboard at `http://192.168.50.1:8080/` has the raw camera, GPS,
 manual driving, and a line showing whether the laptop is currently driving.
 
 Check the webcam:
@@ -137,19 +149,19 @@ python -m venv .venv
 Without the models, body detection falls back to OpenCV's built-in HOG
 detector (much less accurate), and face recognition is disabled.
 
-To run it, join the laptop to `ESP32-Robot` and start the vision app:
+To run it, join the laptop to `TAPIR` and start the vision app:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\run_laptop.ps1
 ```
 
 Open `http://127.0.0.1:8090/` on the laptop. The script points the app at the
-Pi (`-PiUrl http://192.168.4.10:8080` by default), reads the camera from the
+Pi (`-PiUrl http://192.168.50.1:8080` by default), reads the camera from the
 Pi's `/camera`, and only listens on the laptop itself. On macOS or Linux, the
 equivalent is:
 
 ```bash
-VISION_ENABLED=1 ESP32_URL=http://192.168.4.10:8080 CAMERA_STREAM_URL=http://192.168.4.10:8080/camera \
+VISION_ENABLED=1 ESP32_URL=http://192.168.50.1:8080 CAMERA_STREAM_URL=http://192.168.50.1:8080/camera \
   ROVER_HOST=127.0.0.1 ROVER_PORT=8090 .venv/bin/python app.py
 ```
 
@@ -185,10 +197,13 @@ Under the video, choose a mode:
   2. An authorised card tapped on the reader within `AUTH_TIMEOUT` (10 s)
      shows `ACCESS GRANTED` and a green banner. Unknown faces are then
      allowed for `AUTH_GRANT_SECONDS` (2 minutes).
-  3. No authorised card in time: the dashboard raises the red **INTRUDER**
-     alarm with repeated beeps, and the LCD shows `!! INTRUDER !!`. Tapping
+  3. No authorised card in time: the dashboard raises the red **ACCESS DENIED
+     — INTRUDER DETECTED** alarm with repeated beeps, and the LCD shows
+     `INTRUDER` / `DETECTED`. Tapping
      an authorised card still cancels it.
-  4. An unregistered card shows `ACCESS DENIED` and changes nothing.
+  4. An unregistered card shows `ACCESS DENIED` on the LCD and a red
+     **ACCESS DENIED** banner on the dashboard for 5 seconds, and changes
+     nothing else.
 
   The check ends by itself if the unknown person leaves (no unknown face for
   `ALERT_CLEAR_AFTER`, 2 s). Enrolled faces are never challenged.
@@ -245,7 +260,8 @@ set `RFID_ENABLED=0` to turn it off.
 The LCD with an I2C backpack connects to the ESP32 (wiring in the ESP32
 repository's README). The Pi sends it the current status twice a second
 when it changes: `SAFE MODE`, `DETECTION MODE`, `UNKNOWN PERSON` with the
-countdown, `ACCESS GRANTED`, `!! INTRUDER !!`, `FOLLOWING`, and so on. If
+countdown, `ACCESS GRANTED`, `INTRUDER DETECTED`, `WELCOME` with the name of a
+recognized person, `FOLLOWING`, and so on. If
 the Pi stops sending for 10 seconds, the ESP32 shows its own status instead
 of a stale message. Set `LCD_ENABLED=0` to stop the Pi sending.
 
@@ -282,6 +298,15 @@ rover moves continuously instead of stop-start:
 To keep this smooth, the target's position is averaged across frames
 (`FOLLOW_SMOOTHING`) and the speed changes by at most
 `FOLLOW_MAX_SPEED_CHANGE` per command.
+
+Drive commands go from the Pi to the ESP32 as UDP packets (port 4210) when
+the ESP32 firmware supports it. Over HTTP, each command opens a new
+connection, and on the rover's busy Wi-Fi a lost connection-setup packet
+delays a command by a full second, which makes the rover stop and lurch. A
+lost UDP packet costs nothing: the next command replaces it. STOP is sent
+over both UDP and HTTP. The browser also keeps one connection open to the Pi
+for all joystick commands. The Pi logs `ESP32 drive commands: UDP port 4210`
+at start-up, or `HTTP` with older firmware.
 
 Curved driving uses the ESP32's `/api/drive` command. With older ESP32
 firmware the Pi falls back to straight and spin commands automatically
@@ -377,7 +402,7 @@ LEFT/RIGHT. When the ESP32 rejects a command, its status code and body are
 passed back unchanged. The Pi answers `502` only when it cannot reach the
 ESP32.
 
-Anyone on the `ESP32-Robot` Wi-Fi network can use the Pi dashboard, so keep
+Anyone on the `TAPIR` Wi-Fi network can use the Pi dashboard, so keep
 a strong Wi-Fi password on the ESP32.
 
 ## ESP32 prerequisite
