@@ -810,6 +810,7 @@ async function refreshVision() {
         + (names.length ? ` · faces: ${names.join(', ')}` : '');
     }
     text += `\nBody detector: ${v.person_backend} · face recognition: ${v.face_recognition ? 'on' : 'off (models missing)'}`;
+    if (v.timing) text += ` · per frame: body ${v.timing.person_ms} ms, faces ${v.timing.faces_ms} ms`;
     $('#vision').innerText = text;
     const f = data.follow, status = $('#followStatus');
     status.textContent = f.enabled ? `Following ${f.target || 'anyone'}: ${f.state}`

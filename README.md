@@ -295,6 +295,21 @@ rover moves continuously instead of stop-start:
   `FOLLOW_LOST_GRACE` (0.8 s) instead of stopping on every missed frame.
   Lost for longer, or the camera stream freezes: stop and wait.
 
+While the person is briefly not detected (up to `FOLLOW_LOST_GRACE`, 1.5 s)
+the rover keeps driving on its last steering and the yellow target box stays,
+instead of stopping on every missed frame. It only stops for slow vision if
+the newest detection is older than `FOLLOW_VISION_TIMEOUT` (2.5 s). Face
+recognition runs on every 3rd frame (`FACE_EVERY_N_FRAMES`) so that body
+detection, which follow mode steers by, runs as often as possible.
+
+The follow status line shows the numbers behind each decision, for example
+`tracking · target 55% tall, 4% right, vision 7.6 fps · left 148 / right 148`,
+and the vision line shows how long body and face detection take per frame.
+To choose the stopping distance, stand where the rover should stop, read the
+"% tall", and set `FOLLOW_STOP_BODY_HEIGHT` to that value (0.9 = 90%) in
+`/etc/default/rover-dashboard`. If the rover is too slow or too fast, change
+`FOLLOW_MIN_SPEED` and `FOLLOW_MAX_SPEED` (defaults 120 and 190).
+
 To keep this smooth, the target's position is averaged across frames
 (`FOLLOW_SMOOTHING`) and the speed changes by at most
 `FOLLOW_MAX_SPEED_CHANGE` per command.

@@ -265,7 +265,8 @@ def start_vision(camera):
 
     cv2.setNumThreads(config.VISION_THREADS)
     vision = Vision(camera, config.MODELS_DIR, config.FACES_DIR, config.PERSON_CONFIDENCE,
-                    config.FACE_CONFIDENCE, config.FACE_MATCH_THRESHOLD, config.VISION_MAX_FPS)
+                    config.FACE_CONFIDENCE, config.FACE_MATCH_THRESHOLD, config.VISION_MAX_FPS,
+                    config.FACE_EVERY_N_FRAMES)
     camera.annotate = vision.annotate
     follow = FollowController(vision, FollowSettings(
         min_speed=config.FOLLOW_MIN_SPEED,
@@ -282,6 +283,7 @@ def start_vision(camera):
         smoothing=config.FOLLOW_SMOOTHING,
         max_speed_change=config.FOLLOW_MAX_SPEED_CHANGE,
         lost_grace=config.FOLLOW_LOST_GRACE,
+        vision_timeout=config.FOLLOW_VISION_TIMEOUT,
         track_memory=config.FOLLOW_TRACK_MEMORY,
         interval=config.FOLLOW_INTERVAL,
     ))
