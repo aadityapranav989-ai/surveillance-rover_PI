@@ -314,6 +314,23 @@ To keep this smooth, the target's position is averaged across frames
 (`FOLLOW_SMOOTHING`) and the speed changes by at most
 `FOLLOW_MAX_SPEED_CHANGE` per command.
 
+The ESP32 runs motor control in its own high-priority task, so slow web
+requests cannot stall it, and LCD text also goes over UDP. The Pi fetches the
+ESP32's status once a second and shares it with every open dashboard, instead
+of each dashboard asking the ESP32 itself.
+
+**Crowded Wi-Fi.** At events with many phone hotspots, the 2.4 GHz channels
+fill up and the rover's commands and video get delayed. Look at which channel
+is quietest (on Windows: `netsh wlan show networks mode=bssid`, count the
+networks per channel) and move the hotspot there:
+
+```bash
+cd /opt/raspberry-pi-rover && sudo nohup bash scripts/set_hotspot_channel.sh 13 > ~/hotspot.log 2>&1 &
+```
+
+If the new channel is not allowed in the Pi's Wi-Fi country, it goes back to
+the previous one by itself. The ESP32 and the laptop follow automatically.
+
 Drive commands go from the Pi to the ESP32 as UDP packets (port 4210) when
 the ESP32 firmware supports it. Over HTTP, each command opens a new
 connection, and on the rover's busy Wi-Fi a lost connection-setup packet

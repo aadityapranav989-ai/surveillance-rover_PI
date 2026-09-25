@@ -107,6 +107,31 @@ class UdpTest(unittest.TestCase):
         self.status["wifi"] = "10.0.0.99"  # the answer was proxied from an ESP32 elsewhere
         self.assertIsNone(esp32.refresh_udp_port())
 
+    def test_lcd_goes_over_udp_when_firmware_supports_it(self):
+        self.status["udpLcd"] = True
+        esp32.refresh_udp_port()
+        esp32.show_lcd("UNKNOWN PERSON", "Tap card: 7s|x")
+        self.assertEqual(self.socket.sent[-1][0], "LCD UNKNOWN PERSON|Tap card: 7s/x")
+        self.assertNotIn("/api/lcd", " ".join(self.http))
+
+    def test_lcd_uses_http_on_older_firmware(self):
+        esp32.refresh_udp_port()  # udpPort but no udpLcd
+        esp32.show_lcd("SAFE MODE", "Rover ready")
+        self.assertEqual(self.socket.sent, [])
+        self.assertTrue(any(path.startswith("/api/lcd") for path in self.http))
+
+    def test_status_cache_shares_one_fetch(self):
+        cache = esp32.StatusCache(interval=60)
+        cache.start()
+        for _ in range(50):
+            if cache.get():
+                break
+            time.sleep(0.01)
+        for _ in range(10):
+            status, body, _ = cache.get()
+        self.assertEqual(status, 200)
+        self.assertEqual(self.http.count("/api/status"), 1, "ten viewers, one request to the ESP32")
+
     def test_check_runs_in_the_background(self):
         self.delay = 0.2  # a slow status reply must not hold up a drive command
         started = time.monotonic()

@@ -67,7 +67,7 @@ def legacy_command(left, right, ms):
 UDP_RECHECK_SECONDS = 30
 _esp32_host = urlparse(ESP32_URL).hostname
 _udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-_udp = {"port": None, "checked": None, "refreshing": False}
+_udp = {"port": None, "lcd": False, "checked": None, "refreshing": False}
 
 
 def refresh_udp_port():
@@ -81,7 +81,7 @@ def refresh_udp_port():
     port = info.get("udpPort") if info.get("wifi") == _esp32_host else None
     if port != _udp["port"]:
         print(f"ESP32 drive commands: {'UDP port ' + str(port) if port else 'HTTP'}")
-    _udp.update(port=port, checked=time.monotonic(), refreshing=False)
+    _udp.update(port=port, lcd=bool(port and info.get("udpLcd")), checked=time.monotonic(), refreshing=False)
     return port
 
 
@@ -121,8 +121,45 @@ def drive(left, right, ms, source=None):
 
 
 def show_lcd(line1, line2):
-    """Shows two lines on the ESP32's 16x2 LCD."""
+    """Shows two lines on the ESP32's 16x2 LCD: over UDP when the firmware supports it."""
+    port = udp_port()
+    if port and _udp["lcd"]:
+        try:
+            clean = [line[:16].replace("|", "/") for line in (line1, line2)]
+            send_udp(f"LCD {clean[0]}|{clean[1]}", port)
+            return 200, b'{"ok":true,"via":"udp"}', "application/json"
+        except OSError:
+            pass
     return esp32_request("/api/lcd?" + urlencode({"line1": line1[:16], "line2": line2[:16]}), "POST")
+
+
+class StatusCache(threading.Thread):
+    """Fetches the ESP32's status (GPS etc.) once a second and shares it with every viewer.
+
+    Each open dashboard used to ask the ESP32 itself every second; on a congested Wi-Fi
+    those extra requests slowed the ESP32 down. Now it gets one request per second.
+    """
+
+    def __init__(self, interval=1.0, max_age=5.0):
+        super().__init__(daemon=True, name="esp32-status")
+        self.interval = interval
+        self.max_age = max_age
+        self._latest = None  # (status, body, content_type, time)
+
+    def run(self):
+        while True:
+            try:
+                self._latest = (*esp32_request("/api/status"), time.monotonic())
+            except OSError:
+                pass  # keep the last answer until it is too old
+            time.sleep(self.interval)
+
+    def get(self):
+        """(status, body, content_type), or None when there is no recent answer."""
+        latest = self._latest
+        if latest is None or time.monotonic() - latest[3] > self.max_age:
+            return None
+        return latest[:3]
 
 
 def send_stop(source=None):

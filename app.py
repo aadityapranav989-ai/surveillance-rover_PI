@@ -67,6 +67,7 @@ class RoverHandler(BaseHTTPRequestHandler):
     follow = None
     alerts = None
     rfid = None
+    status_cache = None
     autopilot = Autopilot()
 
     def send_payload(self, status, payload, content_type="application/json"):
@@ -85,7 +86,11 @@ class RoverHandler(BaseHTTPRequestHandler):
         if path == "/":
             self.send_payload(200, DASHBOARD, "text/html; charset=utf-8")
         elif path == "/api/status":
-            self.proxy("/api/status", "GET")
+            cached = self.status_cache.get() if self.status_cache else None
+            if cached:
+                self.send_payload(*cached)
+            else:
+                self.send_json(502, {"error": "rover unavailable", "detail": "no recent answer from the ESP32"})
         elif path == "/api/vision":
             vision = self.vision
             self.send_json(200, {
@@ -312,6 +317,8 @@ def main():
                     config.CAMERA_FPS, config.JPEG_QUALITY, config.CAMERA_FOURCC)
     RoverHandler.camera = camera
     esp32.udp_port()  # start the UDP support check now, so the first drive command can use it
+    RoverHandler.status_cache = esp32.StatusCache()
+    RoverHandler.status_cache.start()
     if config.VISION_ENABLED:
         RoverHandler.vision, RoverHandler.follow, RoverHandler.alerts, RoverHandler.rfid = start_vision(camera)
     camera.start()
