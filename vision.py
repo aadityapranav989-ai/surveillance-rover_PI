@@ -26,6 +26,7 @@ class Detection:
     score: float
     name: Optional[str] = None
     similarity: float = 0.0
+    signature: Optional[np.ndarray] = None  # clothing colours, to recognise the same person again
 
     @property
     def area(self):
@@ -44,6 +45,25 @@ class VisionResult:
     height: int
     persons: List[Detection] = field(default_factory=list)
     faces: List[Detection] = field(default_factory=list)
+
+
+def appearance(frame, box):
+    """Clothing colours of a detected person: colour histograms of the upper and lower body.
+
+    Used by follow mode to tell the picked person from others and to find them again
+    after they were out of view. Each half sums to 1; compare with follow.similarity().
+    """
+    x, y, w, h = box
+    # Skip the head and the box edges (background), keep shirt and trousers.
+    crop = frame[y + int(h * 0.2):y + int(h * 0.95), x + int(w * 0.2):x + int(w * 0.8)]
+    if crop.shape[0] < 4 or crop.shape[1] < 2:
+        return None
+    hsv = cv2.cvtColor(cv2.resize(crop, (12, 32), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2HSV)
+    halves = []
+    for part in (hsv[:14], hsv[14:]):  # upper body (shirt), lower body (trousers)
+        hist = cv2.calcHist([part], [0, 1, 2], None, [6, 3, 3], [0, 180, 0, 256, 0, 256]).flatten()
+        halves.append(hist / max(1.0, hist.sum()))
+    return np.concatenate(halves).astype(np.float32)
 
 
 def _clip_box(x1, y1, x2, y2, width, height):
@@ -264,6 +284,8 @@ class Vision(threading.Thread):
         result = VisionResult(frame_id, time.monotonic(), width, height)
         started = time.monotonic()
         result.persons = self.persons.detect(frame)
+        for person in result.persons:
+            person.signature = appearance(frame, person.box)
         after_persons = time.monotonic()
         self._measure("person_ms", after_persons - started)
         if self.faces is not None:

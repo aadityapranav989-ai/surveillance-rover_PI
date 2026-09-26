@@ -44,6 +44,11 @@ small,.hint{color:var(--muted);font-size:12px;display:block;margin-top:8px}
 /* Camera frame with corner brackets and HUD */
 .frame{position:relative;background:#000;border:1px solid var(--line);border-radius:4px;overflow:hidden;transition:border-color .2s,box-shadow .2s}
 .camera{display:block;width:100%;aspect-ratio:4/3;object-fit:contain;background:#000}
+.frame.pickable .camera{cursor:crosshair}
+.tap{position:absolute;z-index:3;width:44px;height:44px;margin:-22px 0 0 -22px;border:2px solid var(--amber);
+  border-radius:50%;pointer-events:none;animation:tap .6s ease-out forwards}
+.tap.miss{border-color:var(--red)}
+@keyframes tap{from{transform:scale(.4);opacity:1}to{transform:scale(1.4);opacity:0}}
 .frame::after{content:"";position:absolute;inset:0;pointer-events:none;
   background:repeating-linear-gradient(0deg,#00000000 0 2px,#0000002e 2px 3px)}
 .corner{position:absolute;width:26px;height:26px;border:2px solid var(--green);opacity:.85;pointer-events:none;z-index:1}
@@ -220,11 +225,12 @@ body.controller .controller-ui{display:block;position:fixed;inset:0;z-index:21;p
       <div class="panel">
         <h2>Follow target</h2>
         <div class="stack">
-          <select id="target" aria-label="Person to follow"><option value="">Anyone (closest person)</option></select>
+          <div class="readout"><b>Tap a person in the video</b> (inside their green box) to follow them. The rover sticks to that person, even when others walk past.</div>
           <div class="row">
-            <button id="followStart">Start following</button>
-            <button id="followStop" class="secondary">Stop following</button>
+            <select id="target" aria-label="Or follow by name"><option value="">Or: anyone (closest person)</option></select>
+            <button id="followStart" class="secondary">Follow</button>
           </div>
+          <button id="followStop">Stop following</button>
           <div class="readout" id="followStatus">Follow mode off</div>
         </div>
         <small>Any manual drive command or STOP ends follow mode. Test with the wheels lifted first.</small>
@@ -620,6 +626,39 @@ $('#followStart').addEventListener('click', () =>
     .catch(e => alert(e.message)).finally(refreshVision));
 $('#followStop').addEventListener('click', () =>
   post('/api/follow/stop').catch(e => alert(e.message)).finally(refreshVision));
+
+// Tap-to-follow: tapping a person in the video follows that person.
+const cameraImg = $('#frame .camera');
+let pickError = null;  // shown for a few seconds under the follow status
+function showTap(event, miss) {
+  const frameBox = $('#frame').getBoundingClientRect(), ring = document.createElement('span');
+  ring.className = 'tap' + (miss ? ' miss' : '');
+  ring.style.left = `${event.clientX - frameBox.left}px`;
+  ring.style.top = `${event.clientY - frameBox.top}px`;
+  $('#frame').appendChild(ring);
+  setTimeout(() => ring.remove(), 700);
+}
+cameraImg.addEventListener('click', async event => {
+  // Not in the phone controller (the video is its background) or when vision is not on this Pi.
+  if (document.body.classList.contains('controller') || $('#visionControls').hidden) return;
+  // The picture is letterboxed inside the image element (object-fit: contain).
+  const box = cameraImg.getBoundingClientRect();
+  const naturalW = cameraImg.naturalWidth || 640, naturalH = cameraImg.naturalHeight || 480;
+  const scale = Math.min(box.width / naturalW, box.height / naturalH);
+  const shownW = naturalW * scale, shownH = naturalH * scale;
+  const x = (event.clientX - box.left - (box.width - shownW) / 2) / shownW;
+  const y = (event.clientY - box.top - (box.height - shownH) / 2) / shownH;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return;
+  try {
+    await post('/api/follow/pick?' + new URLSearchParams({x: x.toFixed(3), y: y.toFixed(3)}));
+    showTap(event, false);
+    pickError = null;
+  } catch (e) {
+    showTap(event, true);
+    pickError = {text: e.message, until: Date.now() + 3000};
+  }
+  refreshVision();
+});
 $('#enroll').addEventListener('click', async () => {
   const name = $('#faceName').value.trim();
   if (!name) { alert('Enter a name first.'); return; }
@@ -828,8 +867,11 @@ async function refreshVision() {
     if (v.timing) text += ` · per frame: body ${v.timing.person_ms} ms, faces ${v.timing.faces_ms} ms`;
     $('#vision').innerText = text;
     const f = data.follow, status = $('#followStatus');
-    status.textContent = f.enabled ? `Following ${f.target || 'anyone'}: ${f.state}`
+    $('#frame').classList.toggle('pickable', !$('#visionControls').hidden);
+    const who = f.picked ? (f.target ? `${f.target} (picked)` : 'the person you picked') : (f.target || 'anyone');
+    status.textContent = f.enabled ? `Following ${who}: ${f.state}`
       : 'Follow mode off' + (f.state === 'off' ? '' : ` (${f.state})`);
+    if (pickError && Date.now() < pickError.until) status.textContent = `${pickError.text}\n${status.textContent}`;
     status.classList.toggle('following', f.enabled);
     renderFaces(data.known_faces);
   } catch (e) {

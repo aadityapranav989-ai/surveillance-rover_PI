@@ -4,8 +4,11 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from follow import FollowController, FollowSettings, Steering, iou, select_target  # noqa: E402
-from vision import Detection, VisionResult  # noqa: E402
+import numpy as np  # noqa: E402
+
+from follow import (FollowController, FollowSettings, Steering, iou, pick_person, select_target,  # noqa: E402
+                    similarity)
+from vision import Detection, VisionResult, appearance  # noqa: E402
 
 SETTINGS = FollowSettings(min_speed=90, max_speed=150, turn_min_speed=255, turn_max_speed=255,
                           full_steer_offset=0.3, command_ms=600, center_enter=0.15, center_exit=0.06,
@@ -240,6 +243,32 @@ class FollowControllerTest(unittest.TestCase):
         self.tick([Detection(body_at(0.5, 0.3), 0.9)])  # found again
         self.assertIn("tracking", self.follow.state)
 
+    def test_tap_to_follow_locks_on_that_person(self):
+        picked = dressed((380, 150, 80, 250), RED, BLACK)
+        bigger = dressed((60, 40, 160, 440), BLUE, GREY)  # "anyone" would take this one
+        self.follow.pick(picked)
+        self.assertTrue(self.follow.status()["picked"])
+        self.assertEqual(self.vision.target_box, picked.box, "the yellow box shows the choice at once")
+        self.tick([bigger, dressed((385, 150, 80, 250), RED, BLACK)])
+        self.assertEqual(self.follow._box, (385, 150, 80, 250))
+        left, right, _ = self.commands[-1]
+        self.assertGreater(left, right, "steers towards the picked person on the right")
+
+    def test_picked_person_is_not_swapped_for_a_stranger(self):
+        self.follow.pick(dressed((380, 150, 80, 250), RED, BLACK))
+        for _ in range(20):  # they leave; a stranger stays in view
+            self.tick([dressed((60, 40, 160, 440), BLUE, GREY)])
+        self.assertIsNone(self.vision.target_box)
+        self.assertNotIn("tracking", self.follow.state)
+        self.tick([dressed((300, 150, 80, 250), RED, BLACK), dressed((60, 40, 160, 440), BLUE, GREY)])
+        self.assertEqual(self.follow._box, (300, 150, 80, 250), "found again by their clothes")
+
+    def test_picking_a_recognized_person_uses_their_name(self):
+        person = dressed((300, 100, 80, 300), RED, BLACK)
+        person.name = "Asha"
+        self.follow.pick(person)
+        self.assertEqual(self.follow.status()["target"], "Asha")
+
     def test_looks_back_after_turning_past_the_person(self):
         self.tick([Detection(body_at(0.85, 0.85), 0.9)])  # close, 35% right: aim right
         self.assertEqual(self.commands[-1][:2], (255, -255))
@@ -264,6 +293,67 @@ class FollowControllerTest(unittest.TestCase):
         for _ in range(4):
             self.tick([person])
         self.assertEqual(self.sent, ["DRIVE"] * 4)
+
+
+def dressed(box, shirt, trousers):
+    """A detection whose clothing signature comes from a drawn person (BGR colours)."""
+    frame = np.zeros((H, W, 3), np.uint8)
+    x, y, w, h = box
+    frame[y:y + h // 2, x:x + w] = shirt
+    frame[y + h // 2:y + h, x:x + w] = trousers
+    return Detection(box, 0.9, signature=appearance(frame, box))
+
+
+RED, BLUE, GREY, BLACK = (40, 40, 200), (200, 60, 30), (128, 128, 128), (20, 20, 20)
+
+
+class PickTest(unittest.TestCase):
+    def test_picks_the_person_tapped(self):
+        left, right = Detection((50, 100, 100, 300), 0.9), Detection((400, 100, 100, 300), 0.9)
+        self.assertIs(pick_person(result([left, right]), 450 / W, 250 / H), right)
+        self.assertIs(pick_person(result([left, right]), 100 / W, 250 / H), left)
+
+    def test_overlapping_boxes_pick_the_smaller(self):
+        near, far = Detection((100, 50, 300, 430), 0.9), Detection((200, 150, 60, 150), 0.9)
+        self.assertIs(pick_person(result([near, far]), 230 / W, 200 / H), far)
+
+    def test_tap_just_beside_a_box_still_counts(self):
+        person = Detection((300, 100, 80, 300), 0.9)
+        self.assertIs(pick_person(result([person]), 400 / W, 250 / H), person)
+        self.assertIsNone(pick_person(result([person]), 600 / W, 250 / H), "far from everyone: nobody")
+
+    def test_clothing_signature_tells_people_apart(self):
+        red = dressed((100, 100, 80, 300), RED, BLACK)
+        red_again = dressed((400, 60, 100, 380), RED, BLACK)  # same clothes, other place and size
+        blue = dressed((250, 100, 80, 300), BLUE, GREY)
+        self.assertGreater(similarity(red.signature, red_again.signature), 0.9)
+        self.assertLess(similarity(red.signature, blue.signature), 0.3)
+
+
+class LockedTargetTest(unittest.TestCase):
+    def test_ignores_strangers_once_the_picked_person_is_gone(self):
+        stranger = dressed((300, 100, 120, 350), BLUE, GREY)
+        picked = dressed((0, 0, 80, 300), RED, BLACK)
+        self.assertEqual(select_target(result([stranger]), "", None, picked.signature, locked=True), (None, None))
+
+    def test_finds_the_picked_person_again_by_their_clothes(self):
+        picked = dressed((100, 100, 80, 300), RED, BLACK)
+        back = dressed((450, 80, 90, 330), RED, BLACK)
+        stranger = dressed((250, 100, 120, 350), BLUE, GREY)
+        self.assertEqual(select_target(result([stranger, back]), "", None, picked.signature, locked=True),
+                         (back, "body"))
+
+    def test_not_sure_between_two_lookalikes_waits(self):
+        picked = dressed((100, 100, 80, 300), RED, BLACK)
+        twins = [dressed((150, 100, 80, 300), RED, BLACK), dressed((450, 100, 80, 300), RED, BLACK)]
+        self.assertEqual(select_target(result(twins), "", None, picked.signature, locked=True), (None, None))
+
+    def test_stays_with_the_picked_person_when_someone_crosses(self):
+        picked = dressed((300, 100, 80, 300), RED, BLACK)
+        crossing = dressed((290, 90, 100, 330), BLUE, GREY)  # overlaps the track more than the person
+        still_there = dressed((310, 100, 80, 300), RED, BLACK)
+        self.assertEqual(select_target(result([crossing, still_there]), "", (300, 100, 80, 300),
+                                       picked.signature, locked=True), (still_there, "body"))
 
 
 class SelectTargetTest(unittest.TestCase):

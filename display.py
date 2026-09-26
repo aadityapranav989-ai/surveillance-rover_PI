@@ -56,7 +56,8 @@ def lcd_lines(alerts, rfid, follow, vision, camera_online, known_names=()):
         if a["state"] == GRANTED:
             return "AUTHORISED", a["granted_name"]
     if follow and follow.enabled:
-        return "FOLLOWING", follow.target_name or "Nearest person"
+        return "FOLLOWING", follow.target_name or ("Picked person" if getattr(follow, "picked", False)
+                                                   else "Nearest person")
     if not camera_online:
         return "CAMERA OFFLINE", "Check webcam"
     if a["mode"] == DETECTION:

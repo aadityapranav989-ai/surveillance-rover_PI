@@ -14,7 +14,7 @@ import config
 import esp32
 from alerts import AlertMonitor
 from camera import Camera
-from follow import OPERATOR_STOP, FollowController, FollowSettings
+from follow import OPERATOR_STOP, FollowController, FollowSettings, pick_person
 
 with open(os.path.join(config.BASE_DIR, "static", "dashboard.html"), encoding="utf-8") as dashboard_file:
     DASHBOARD = (dashboard_file.read()
@@ -223,6 +223,22 @@ class RoverHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": f"unknown person '{target}'"})
                 return
             self.follow.enable(target)
+            self.send_json(200, self.follow.status())
+        elif parsed.path == "/api/follow/pick":
+            try:
+                x, y = float(param("x")), float(param("y"))
+            except ValueError:
+                self.send_json(400, {"error": "x and y must be numbers (fractions of the picture)"})
+                return
+            result = self.vision.latest
+            if result is None or time.monotonic() - result.timestamp > 2:
+                self.send_json(409, {"error": "no recent camera picture"})
+                return
+            person = pick_person(result, min(max(x, 0.0), 1.0), min(max(y, 0.0), 1.0))
+            if person is None:
+                self.send_json(404, {"error": "no person there: tap inside a green box"})
+                return
+            self.follow.pick(person)
             self.send_json(200, self.follow.status())
         elif parsed.path == "/api/follow/stop":
             self.follow.disable("off")

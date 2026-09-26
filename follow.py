@@ -3,6 +3,8 @@ import time
 from dataclasses import dataclass
 from urllib.error import URLError
 
+import numpy as np
+
 import esp32
 
 OPERATOR_STOP = 423  # "Locked": the Pi gateway refuses follow commands after an operator STOP
@@ -47,12 +49,41 @@ def iou(a, b):
     return overlap / union if union else 0.0
 
 
-def select_target(result, target_name, previous_box):
+SAME_PERSON = 0.6  # clothing similarity needed to accept someone as the picked person again
+CLEAR_MARGIN = 0.1  # ...and by this much more than anyone else in view
+
+
+def similarity(a, b):
+    """How alike two clothing signatures are: 0 (nothing in common) to 1 (identical)."""
+    if a is None or b is None:
+        return 0.0
+    return float(np.minimum(a, b).sum() / 2)  # histogram intersection; each half sums to 1
+
+
+def pick_person(result, x, y):
+    """The person at (x, y), fractions of the picture: the one whose box contains the
+    point (the smallest, if boxes overlap), else the nearest within 10% of the width."""
+    px, py = x * result.width, y * result.height
+    inside = [p for p in result.persons
+              if p.box[0] <= px <= p.box[0] + p.box[2] and p.box[1] <= py <= p.box[1] + p.box[3]]
+    if inside:
+        return min(inside, key=lambda p: p.area)
+
+    def distance(p):
+        bx, by, bw, bh = p.box
+        return max(bx - px, 0, px - bx - bw) + max(by - py, 0, py - by - bh)
+    near = [p for p in result.persons if distance(p) <= 0.1 * result.width]
+    return min(near, key=distance) if near else None
+
+
+def select_target(result, target_name, previous_box, signature=None, locked=False):
     """Picks the detection to follow. Returns (detection, kind) or (None, None).
 
     With a target name, only a person whose face was recognized as that name is
     accepted, or the body that continues the previous track (face turned away).
-    Without a name, the previously tracked body is preferred, then the largest.
+    Locked on a picked person, only the body that continues the track is accepted,
+    or, once they were out of view, someone whose clothes clearly match theirs.
+    Otherwise the previously tracked body is preferred, then the largest.
     """
     persons = result.persons
     if target_name:
@@ -63,9 +94,20 @@ def select_target(result, target_name, previous_box):
         if faces:
             return max(faces, key=lambda d: d.area), "face"
     if previous_box is not None and persons:
-        best = max(persons, key=lambda p: iou(p.box, previous_box))
-        if iou(best.box, previous_box) >= 0.3:
-            return best, "body"
+        overlapping = [p for p in persons if iou(p.box, previous_box) >= 0.3]
+        if len(overlapping) > 1 and signature is not None:
+            # People crossing paths: stay with the one dressed like the picked person.
+            return max(overlapping, key=lambda p: similarity(p.signature, signature)), "body"
+        if overlapping:
+            return max(overlapping, key=lambda p: iou(p.box, previous_box)), "body"
+    if locked:
+        if signature is not None and persons:
+            scores = sorted(((similarity(p.signature, signature), i) for i, p in enumerate(persons)), reverse=True)
+            best, index = scores[0]
+            runner_up = scores[1][0] if len(scores) > 1 else 0.0
+            if best >= SAME_PERSON and best - runner_up >= CLEAR_MARGIN:
+                return persons[index], "body"
+        return None, None
     if target_name:
         return None, None
     if persons:
@@ -238,6 +280,8 @@ class FollowController(threading.Thread):
         self.steering = Steering(settings)
         self.enabled = False
         self.target_name = ""
+        self.picked = False  # following a person picked on the video, not anyone or a name
+        self.signature = None  # the picked person's clothing colours
         self.state = "off"
         self._reset_track()
         self._moving = False
@@ -259,9 +303,30 @@ class FollowController(threading.Thread):
         with self._lock:
             self.enabled = True
             self.target_name = target_name
+            self.picked = False
+            self.signature = None
             self._reset_track()
             self.steering.reset()
             self.state = "searching"
+
+    def pick(self, person):
+        """Follows this detected person (picked on the video) and nobody else.
+
+        A recognized face also identifies them; otherwise they are kept apart from
+        others by their track and clothing colours.
+        """
+        self._send(esp32.resume_autopilot)
+        with self._lock:
+            self.enabled = True
+            self.target_name = person.name or ""
+            self.picked = True
+            self.signature = person.signature
+            self._reset_track()
+            self._box = person.box
+            self._last_seen = self.clock()
+            self.vision.target_box = person.box
+            self.steering.reset()
+            self.state = "locked on"
 
     def disable(self, reason="off"):
         """Stops follow mode. Any in-flight follow command completes before this returns."""
@@ -277,7 +342,7 @@ class FollowController(threading.Thread):
             self._send(esp32.send_stop, esp32.AUTO)
 
     def status(self):
-        return {"enabled": self.enabled, "target": self.target_name, "state": self.state}
+        return {"enabled": self.enabled, "target": self.target_name, "picked": self.picked, "state": self.state}
 
     def _send(self, function, *args):
         """Returns the HTTP status, or None when the rover could not be reached."""
@@ -314,9 +379,10 @@ class FollowController(threading.Thread):
             # taken while the rover was still turning are skipped: the person has moved in them.
             self._last_frame = result.frame_id
             previous = self._box if now - self._last_seen < s.track_memory else None
-            target, kind = select_target(result, self.target_name, previous)
+            target, kind = select_target(result, self.target_name, previous, self.signature, self.picked)
             self._visible = target is not None
             if target is not None:
+                self._learn_appearance(target, result)
                 self._box = target.box
                 self._last_seen = now
                 self._searches = 0
@@ -332,6 +398,10 @@ class FollowController(threading.Thread):
         if after_burst:
             self.state = "aiming · looking for the person again"
             return
+        if self.steering.offset is None:
+            # Just picked on the video, and not in a new picture yet.
+            self._hold("locked on · looking for them")
+            return
         # Detections flicker, so while the person is briefly not detected the rover keeps
         # driving on its last steering (and the yellow box stays) instead of stopping.
         command = self.steering.command()
@@ -346,6 +416,15 @@ class FollowController(threading.Thread):
         hidden = "" if self._visible else " · briefly hidden"
         self.state = f"tracking · {detail} · left {left} / right {right}{hidden}"
         self._drive(left, right, s.command_ms)
+
+    def _learn_appearance(self, target, result):
+        """Slowly follows the picked person's colours as the light changes, but only while
+        nobody else is near them, so the signature never drifts onto someone else."""
+        if self.signature is None or target.signature is None:
+            return
+        others = [p for p in result.persons if p is not target and iou(p.box, target.box) > 0]
+        if not others and similarity(target.signature, self.signature) >= SAME_PERSON:
+            self.signature = 0.9 * self.signature + 0.1 * target.signature
 
     def _lost(self):
         """The person has been gone longer than a detection blip."""

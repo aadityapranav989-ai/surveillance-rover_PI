@@ -268,7 +268,14 @@ of a stale message. Set `LCD_ENABLED=0` to stop the Pi sending.
 ## Follow mode
 
 On the dashboard (the Pi's, or the laptop's when vision runs there) under
-**Follow target**, choose a target and press **Start following**:
+**Tap a person in the video** (inside their green box) to follow them. The
+rover locks onto that person: it follows only them, keeps with them when
+others walk past or cross in front (by their track and their clothing
+colours), and if it loses sight of them it only restarts following when
+someone dressed like them clearly reappears. If their face is recognized,
+their name identifies them too. The yellow box shows who it is following.
+
+Or, under **Follow target**, choose a target and press **Follow**:
 
 - **Anyone**: follows the closest (largest) detected person and sticks with
   that person while they stay in view.
@@ -491,6 +498,7 @@ Laptop only:
 | Method | Path | Purpose |
 | --- | --- | --- |
 | POST | `/api/follow?target=NAME` | Start following `NAME`, or anyone when empty |
+| POST | `/api/follow/pick?x=&y=` | Follow the person at that point of the picture (fractions 0..1), as when tapping the video |
 | POST | `/api/follow/stop` | End follow mode |
 | POST | `/api/faces/enroll?name=NAME` | Enroll the single face in view |
 | POST | `/api/faces/delete?name=NAME` | Delete an enrolled person |
