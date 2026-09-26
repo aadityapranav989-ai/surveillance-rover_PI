@@ -286,14 +286,32 @@ rover moves continuously instead of stop-start:
   the tightest curve when the person is `FOLLOW_FULL_STEER_OFFSET` (30%)
   off-center, so it bends towards them in one motion. It is faster when the
   person is farther away (`FOLLOW_MIN_SPEED` to `FOLLOW_MAX_SPEED`).
-- Target fills `FOLLOW_STOP_BODY_HEIGHT` of the frame height: stop (close
-  enough). It drives again once the person has moved away by
-  `FOLLOW_RESUME_MARGIN`, so it does not creep back and forth. While close,
-  it turns on the spot (`FOLLOW_TURN_MIN_SPEED` to `FOLLOW_TURN_MAX_SPEED`)
-  to keep facing the person once they move beyond `FOLLOW_CENTER_ENTER`.
+  The curve is steered by where the person will be `FOLLOW_LEAD` (0.4 s)
+  ahead, worked out from how they move across the picture. Vision sees each
+  frame late, so steering by where they were makes the rover keep turning after
+  it already faces them and then swing back (weaving).
+- Target fills `FOLLOW_STOP_BODY_HEIGHT` of the frame height: ease to a stop
+  (close enough). It drives again once the person has moved away by
+  `FOLLOW_RESUME_MARGIN`, so it does not creep back and forth.
+- Turning on the spot ("aiming") happens in short bursts: turn at
+  `TURN_POWER` for `FOLLOW_PULSE_MIN_MS` to `FOLLOW_PULSE_MAX_MS` (200 to
+  700 ms), stop, wait `FOLLOW_SETTLE` for a steady picture, and turn again
+  only if still needed. The rover learns how far a burst turns it from how
+  far the person moved in the picture, and sizes each burst to bring them
+  most of the way to the center. The first one or two bursts are
+  deliberately short while it learns; if a burst turns right past the
+  person, it looks back the other way.
+  A continuous full-power spin is too fast to steer by a late camera: it
+  overshoots, swings back, and hunts left and right. It aims when close and
+  the person is more than `FOLLOW_CENTER_ENTER` (15%) off-center, and while
+  approaching when they are at the edge of the picture (`FOLLOW_AIM_OFFSET`,
+  35%): it faces them first, then drives. If even the shortest burst
+  overshoots, lower `FOLLOW_PULSE_MIN_MS`.
+- Person walked out of the side of the picture: turn that way up to
+  `FOLLOW_SEARCH_BURSTS` (3) bursts to find them again, then wait.
 - Target not detected for a moment: keep going for up to
   `FOLLOW_LOST_GRACE` (0.8 s) instead of stopping on every missed frame.
-  Lost for longer, or the camera stream freezes: stop and wait.
+  Lost for longer, or the camera stream freezes: ease to a stop and wait.
 
 While the person is briefly not detected (up to `FOLLOW_LOST_GRACE`, 1.5 s)
 the rover keeps driving on its last steering and the yellow target box stays,
@@ -309,6 +327,10 @@ To choose the stopping distance, stand where the rover should stop, read the
 "% tall", and set `FOLLOW_STOP_BODY_HEIGHT` to that value (0.9 = 90%) in
 `/etc/default/rover-dashboard`. If the rover is too slow or too fast, change
 `FOLLOW_MIN_SPEED` and `FOLLOW_MAX_SPEED` (defaults 120 and 190).
+
+Manual driving sends 0.7 s commands every 0.15 s, so one slow Wi-Fi moment
+does not let a command run out (which made the motors ramp down and up again,
+a jerk). Letting go of the joystick still stops at once.
 
 To keep this smooth, the target's position is averaged across frames
 (`FOLLOW_SMOOTHING`) and the speed changes by at most

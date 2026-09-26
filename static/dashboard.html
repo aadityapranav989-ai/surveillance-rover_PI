@@ -353,7 +353,10 @@ async function send(url) {
 function move(direction, speed, value) { send('/api/command?' + new URLSearchParams({direction, speed, value})); }
 // Separate left/right wheel speeds: the joystick can curve instead of only driving straight or spinning.
 function drive(left, right, ms) { send('/api/drive?' + new URLSearchParams({left, right, ms})); }
-const JOYSTICK_MS = 400;  // each command outlasts the 150 ms tick (with room for a slow one), so held movement is continuous
+// Each command outlasts the 150 ms tick with room for a slow Wi-Fi moment: if one runs out
+// before the next arrives, the motors ramp down and up again, which feels like a jerk.
+// Letting go still stops at once.
+const JOYSTICK_MS = 700;
 
 document.querySelectorAll('[data-move]').forEach(button => {
   const direction = button.dataset.move;
@@ -440,7 +443,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) relea
 // Input comes from the keyboard, the on-screen buttons (also the full-screen phone
 // controller) and game controllers; triggers and the stick are analog.
 const GTA = {
-  tickMs: 120, commandMs: 400,          // commands outlast the tick, so motion is continuous
+  tickMs: 120, commandMs: 700,          // commands outlast the tick (and a slow Wi-Fi moment), so motion is continuous
   accel: 0.9, brake: 2.5, drag: 0.7,    // speed change per second (1 = the speed limit)
   reverseMax: 0.5, steerRate: 5, steerMix: 0.7, stickDeadZone: 0.15,
   minPower: 60,                         // below this the motors do not turn, so start from here

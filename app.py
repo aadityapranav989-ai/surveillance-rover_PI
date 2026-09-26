@@ -292,6 +292,12 @@ def start_vision(camera):
         vision_timeout=config.FOLLOW_VISION_TIMEOUT,
         track_memory=config.FOLLOW_TRACK_MEMORY,
         interval=config.FOLLOW_INTERVAL,
+        lead=config.FOLLOW_LEAD,
+        aim_offset=config.FOLLOW_AIM_OFFSET,
+        pulse_min_ms=config.FOLLOW_PULSE_MIN_MS,
+        pulse_max_ms=config.FOLLOW_PULSE_MAX_MS,
+        settle=config.FOLLOW_SETTLE,
+        search_bursts=config.FOLLOW_SEARCH_BURSTS,
     ))
     alerts = AlertMonitor(config.SETTINGS_FILE, config.ALERT_CLEAR_AFTER, config.AUTH_TIMEOUT,
                           config.AUTH_GRANT_SECONDS)

@@ -106,14 +106,30 @@ TURN_POWER = _int("TURN_POWER", 255)
 # TURN_POWER and the near side slows, reaching the tightest curve when the person
 # is FOLLOW_FULL_STEER_OFFSET (fraction of the frame width) off-center.
 FOLLOW_FULL_STEER_OFFSET = _float("FOLLOW_FULL_STEER_OFFSET", 0.3)
-# Once close, it turns on the spot to keep facing the person.
+# The curve is steered by where the person will be FOLLOW_LEAD seconds ahead,
+# because vision sees each frame late; this stops the rover weaving left and right.
+FOLLOW_LEAD = _float("FOLLOW_LEAD", 0.4)
+# Turning on the spot happens in short bursts at this power: turn, stop, look at a
+# fresh frame, turn again if needed. A full-power spin is too fast to steer by a
+# camera that is a fraction of a second late (it overshoots and swings back).
 FOLLOW_TURN_MIN_SPEED = _int("FOLLOW_TURN_MIN_SPEED", TURN_POWER)
 FOLLOW_TURN_MAX_SPEED = _int("FOLLOW_TURN_MAX_SPEED", TURN_POWER)
-# When close, start turning on the spot once the person is this far off-center
-# (fraction of the frame width), and stop once back within FOLLOW_CENTER_EXIT.
-# FOLLOW_CENTER_EXIT is also the steering dead zone while approaching.
+# Shortest and longest burst. The rover learns how far a burst turns it (from how
+# far the person moves in the picture) and sizes each burst from that, within these.
+FOLLOW_PULSE_MIN_MS = _int("FOLLOW_PULSE_MIN_MS", 200)
+FOLLOW_PULSE_MAX_MS = _int("FOLLOW_PULSE_MAX_MS", 700)
+# After a burst, wait this long for the rover and camera to steady before looking.
+FOLLOW_SETTLE = _float("FOLLOW_SETTLE", 0.2)
+# Bursts are used when close and the person is more than FOLLOW_CENTER_ENTER off-center
+# (fraction of the frame width), and while approaching when they are more than
+# FOLLOW_AIM_OFFSET off-center (at the edge of the picture: face them, then drive).
 FOLLOW_CENTER_ENTER = _float("FOLLOW_CENTER_ENTER", 0.15)
+FOLLOW_AIM_OFFSET = _float("FOLLOW_AIM_OFFSET", 0.35)
+# Steering dead zone while approaching.
 FOLLOW_CENTER_EXIT = _float("FOLLOW_CENTER_EXIT", 0.06)
+# If the person walks out of the side of the picture, turn that way this many
+# bursts to find them again before giving up.
+FOLLOW_SEARCH_BURSTS = _int("FOLLOW_SEARCH_BURSTS", 3)
 # Stop approaching once the target fills this fraction of the frame height,
 # and drive again once it has shrunk by FOLLOW_RESUME_MARGIN of that. With a
 # mast-mounted webcam (about 45 degrees vertical view) 0.9 stops about 2 m from

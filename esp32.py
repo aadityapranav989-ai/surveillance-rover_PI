@@ -120,6 +120,22 @@ def drive(left, right, ms, source=None):
     return send_command(*legacy_command(left, right, ms), source)
 
 
+def ease_stop(source=None):
+    """Stops the rover gently: the motors ramp down (MOTOR_RAMP_MS) instead of braking at once.
+
+    Falls back to a normal STOP when UDP is not available. If the packet is lost, the
+    last command still ends by itself within FOLLOW_COMMAND_MS.
+    """
+    port = udp_port()
+    if port:
+        try:
+            send_udp("DRIVE 0 0 1", port)
+            return 200, b'{"ok":true,"via":"udp"}', "application/json"
+        except OSError:
+            pass
+    return send_stop(source)
+
+
 def show_lcd(line1, line2):
     """Shows two lines on the ESP32's 16x2 LCD: over UDP when the firmware supports it."""
     port = udp_port()

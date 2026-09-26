@@ -96,6 +96,12 @@ class UdpTest(unittest.TestCase):
         self.assertEqual(self.socket.sent[0][0], "STOP")
         self.assertIn("/api/stop", self.http)
 
+    def test_ease_stop_ramps_down_over_udp(self):
+        esp32.refresh_udp_port()
+        esp32.ease_stop(esp32.AUTO)
+        self.assertEqual(self.socket.sent[-1][0], "DRIVE 0 0 1")
+        self.assertNotIn("/api/stop?source=auto", self.http)
+
     def test_old_firmware_uses_http(self):
         del self.status["udpPort"]
         self.assertIsNone(esp32.refresh_udp_port())
