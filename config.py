@@ -123,8 +123,11 @@ FOLLOW_SETTLE = _float("FOLLOW_SETTLE", 0.2)
 # Bursts are used when close and the person is more than FOLLOW_CENTER_ENTER off-center
 # (fraction of the frame width), and while approaching when they are more than
 # FOLLOW_AIM_OFFSET off-center (at the edge of the picture: face them, then drive).
-FOLLOW_CENTER_ENTER = _float("FOLLOW_CENTER_ENTER", 0.15)
+FOLLOW_CENTER_ENTER = _float("FOLLOW_CENTER_ENTER", 0.1)
 FOLLOW_AIM_OFFSET = _float("FOLLOW_AIM_OFFSET", 0.35)
+# A walking person is kept centred by turning to where they will be FOLLOW_AIM_AHEAD
+# seconds later (about one burst, including waiting for a steady picture).
+FOLLOW_AIM_AHEAD = _float("FOLLOW_AIM_AHEAD", 1.0)
 # Steering dead zone while approaching.
 FOLLOW_CENTER_EXIT = _float("FOLLOW_CENTER_EXIT", 0.06)
 # If the person walks out of the side of the picture, turn that way this many

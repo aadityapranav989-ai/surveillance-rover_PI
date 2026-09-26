@@ -314,6 +314,7 @@ def start_vision(camera):
         pulse_max_ms=config.FOLLOW_PULSE_MAX_MS,
         settle=config.FOLLOW_SETTLE,
         search_bursts=config.FOLLOW_SEARCH_BURSTS,
+        aim_ahead=config.FOLLOW_AIM_AHEAD,
     ))
     alerts = AlertMonitor(config.SETTINGS_FILE, config.ALERT_CLEAR_AFTER, config.AUTH_TIMEOUT,
                           config.AUTH_GRANT_SECONDS)

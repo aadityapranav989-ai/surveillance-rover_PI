@@ -37,6 +37,7 @@ class FollowSettings:
     settle: float = 0.2  # after a burst, wait this long before trusting a new frame
     search_edge: float = 0.25  # a person last seen further off-center than this left the picture that way
     search_bursts: int = 3  # turn bursts towards that side before giving up
+    aim_ahead: float = 1.0  # turn to where a walking person will be this many seconds later
 
 
 def iou(a, b):
@@ -134,10 +135,19 @@ class Steering:
     one to match.
     """
 
-    # Starting guess for how far a burst turns: fraction of the picture per ms of burst.
-    # Deliberately high, so the first bursts are short and undershoot rather than spin
-    # past the person; learning then lengthens them.
-    TURN_GAIN_START = 0.0015
+    # Starting guess for how far a burst turns: fraction of the picture per ms of burst
+    # beyond its dead time. Deliberately high, so the first bursts are short and undershoot
+    # rather than spin past the person; learning then lengthens them.
+    TURN_GAIN_START = 0.0025  # about 150 degrees per second
+    # The motors ramp up over MOTOR_RAMP_MS and this rover only turns near full power,
+    # so roughly the first 60% of the ramp does not turn it: a 400 ms burst turns
+    # more than twice as far as a 200 ms one.
+    DEAD_TIME_SHARE = 0.6
+    MAX_AIM_TURN = 0.6  # never plan to turn further than this (fraction of the picture) at once
+    # Walking speed is the trend over the newest WALK_PICTURES pictures; below WALK_THRESHOLD
+    # (pictures per second) it is taken as the box wobbling, not walking.
+    WALK_PICTURES = 4
+    WALK_THRESHOLD = 0.15
     TURN_GAIN_RANGE = (0.0001, 0.01)
 
     def __init__(self, settings):
@@ -152,71 +162,141 @@ class Steering:
         self.holding = False
         self.base = 0  # current forward speed
         self.pulse_ms = None  # set when the last command was a turn-on-the-spot burst
-        self._raw = None  # (offset, timestamp) of the last detection, for the velocity
-        self._aimed = None  # (offset before, direction, ms) of the last aiming burst, to learn from
+        self._raw = None  # (offset, timestamp) of the last detection
+        self._track = []  # recent (timestamp, offset) while the rover stood or drove straight, for the velocity
+        self._aimed = None  # (offset, velocity, time) before the last aiming burst, and its direction and ms
+        self._after_turn = None  # (offset, time) of the first steady picture after a burst
         if not hasattr(self, "turn_gain"):
             self.turn_gain = self.TURN_GAIN_START  # kept across resets: it describes the rover
+            self.learned = False  # turn_gain has been measured, not just the starting guess
 
-    def learn(self, offset_after):
+    def learn(self, offset_after, time_after=None):
         """Updates how far a burst turns, from where the person is after the last aiming burst."""
-        before, direction, ms = self._aimed
+        before, _, time_before, direction, ms, learnable = self._aimed
         self._aimed = None
+        if not learnable:
+            return
+        if time_after is not None and time_before is not None:
+            before += self.walking() * (time_after - time_before)  # where they walked meanwhile
         turned = (before - offset_after) * direction  # positive: turned towards the person
         if turned > 0.03:
-            self.turn_gain = 0.5 * self.turn_gain + 0.5 * turned / ms
+            # Trust a clear measurement more than the old value; the first one replaces the guess.
+            weight = 0.5 if self.learned else 1.0
+            self.turn_gain = (1 - weight) * self.turn_gain + weight * turned / self._turning_ms(ms)
+            self.learned = True
         else:
             self.turn_gain *= 0.7  # hardly turned: make the next burst longer
         self.turn_gain = min(max(self.turn_gain, self.TURN_GAIN_RANGE[0]), self.TURN_GAIN_RANGE[1])
 
     def learn_lost(self):
-        """The person left the picture during an aiming burst: it turned right past them.
+        """The person left the picture during an aiming burst: usually it turned right past them.
 
-        Returns the side to look (+1 right, -1 left), or 0 if the last burst was not aiming.
+        Returns (side, sure): the side to look (+1 right, -1 left), or 0 if the last burst
+        was not aiming, and whether the guess is based on a measured turn.
         """
         if self._aimed is None:
-            return 0
-        before, direction, ms = self._aimed
+            return 0, True
+        sure = self.learned
+        before, walking, _, direction, ms, learnable = self._aimed
         self._aimed = None
+        # Where the person should be now if the burst turned as far as expected.
+        expected = before + walking * self.settings.aim_ahead - direction * self.turn_gain * self._turning_ms(ms)
+        sure = sure and learnable
+        if expected * direction > 0.4 or (walking * direction > 0 and expected * direction > -0.3):
+            # They were walking the way it turned and got ahead of it (a burst planned
+            # from a late picture falls short of a walker more easily than it overshoots).
+            return direction, sure
+        if not sure and abs(walking) > 0.1:
+            # The turn size is only a guess, but they were walking: look where they were going.
+            return (1 if walking > 0 else -1), False
         # It turned at least past the edge of the picture on the other side.
-        self.turn_gain = min(max(self.turn_gain * 1.5, (abs(before) + 0.5) / ms), self.TURN_GAIN_RANGE[1])
-        return -direction
+        if sure:
+            self.turn_gain = min(max(self.turn_gain * 1.5, (abs(before) + 0.5) / self._turning_ms(ms)),
+                                 self.TURN_GAIN_RANGE[1])
+        return -direction, sure
     def observe(self, box, kind, frame_width, frame_height, timestamp=None, fresh=False):
         """Adds a detection. fresh=True drops the history, e.g. after the rover has turned."""
         x, y, w, h = box
         offset = (x + w / 2) / frame_width - 0.5
         size = h / frame_height
-        if fresh and self._aimed is not None:
-            self.learn(offset)
-        if fresh or self.offset is None or kind != self.kind:
+        if self.offset is None or kind != self.kind:
             self.offset, self.size, self.velocity = offset, size, 0.0
+            self._track = []
+        elif fresh:
+            # After a turn the old position is meaningless, but the person is still walking
+            # the same way: keep the velocity (measured while the rover stood still).
+            self.offset, self.size = offset, size
+            self._track = []
+            if self._aimed is not None:
+                self._after_turn = (offset, timestamp)
         else:
             weight = self.settings.smoothing
-            if timestamp is not None and self._raw is not None and timestamp > self._raw[1]:
-                speed = (offset - self._raw[0]) / (timestamp - self._raw[1])
-                speed = max(-1.5, min(1.5, speed))  # one bad box must not throw the steering
-                self.velocity = weight * speed + (1 - weight) * self.velocity
+            self._measure_walking(offset, timestamp)
             self.offset = weight * offset + (1 - weight) * self.offset
             self.size = weight * size + (1 - weight) * self.size
+            if self._after_turn is not None and self._aimed is not None:
+                # Second steady picture after a burst: the walking speed is up to date,
+                # so the person's own movement can be told apart from the turn.
+                self.learn(*self._after_turn)
+            self._after_turn = None
         self._raw = (offset, timestamp) if timestamp is not None else None
+        if timestamp is not None and not self._track:
+            self._track = [(timestamp, offset)]
         self.kind = kind
 
-    def command(self):
+    def _measure_walking(self, offset, timestamp):
+        """Sideways speed from the trend over the last second of pictures.
+
+        Detection boxes wobble by a few percent from frame to frame; a straight-line fit over
+        several pictures tells a walking person from a wobbling box. With fewer than three
+        pictures (just after a turn) the previous speed is kept.
+        """
+        if timestamp is None:
+            return
+        self._track = [(t, o) for t, o in self._track if timestamp - t <= 1.2 and t < timestamp]
+        self._track = self._track[-(self.WALK_PICTURES - 1):]
+        self._track.append((timestamp, offset))
+        if len(self._track) < 3:
+            return
+        mean_t = sum(t for t, _ in self._track) / len(self._track)
+        mean_o = sum(o for _, o in self._track) / len(self._track)
+        spread = sum((t - mean_t) ** 2 for t, _ in self._track)
+        if spread > 0:
+            slope = sum((t - mean_t) * (o - mean_o) for t, o in self._track) / spread
+            self.velocity = max(-1.5, min(1.5, slope))
+
+    def command(self, age=0.0):
         """Returns (left, right) wheel speeds, or None when the rover should hold still.
 
-        For a turn on the spot, pulse_ms is the burst length; otherwise it is None.
+        age is how old the newest picture is. For a turn on the spot, pulse_ms is the
+        burst length; otherwise it is None.
         """
         s = self.settings
         self.pulse_ms = None
         stop_height = s.stop_body_height if self.kind == "body" else s.stop_face_height
         limit = stop_height * (1 - s.resume_margin) if self.holding else stop_height
         self.holding = self.size >= limit
+        # Where the person will be after one aiming burst, if they keep walking. Turning
+        # towards that, not where they are now, keeps a walking person in the centre
+        # instead of always catching up once they are nearly out of the picture.
+        walking = self.walking()
+        if not self.holding and walking * self.offset < 0:
+            # While driving, drifting towards the centre is mostly the rover's own curve.
+            walking = 0.0
+        predicted = max(-0.9, min(0.9, self.predict(age + s.aim_ahead, walking)))
         if self.holding:
             self.base = 0
-            return self._aim() if abs(self.offset) > s.center_enter else None
-        if abs(self.offset) > s.aim_offset:
-            # Person at the edge of the picture: face them first, then drive.
+            return self._aim(predicted) if abs(predicted) > s.center_enter else None
+        # Someone walking across the picture is kept centred by turning, as when close;
+        # someone standing is approached in a smooth curve unless they are at the edge.
+        aim_limit = s.center_enter * 2 if walking else s.aim_offset
+        if abs(predicted) > aim_limit:
+            # Person at (or walking out of) the edge of the picture: face them first, then drive.
+            # A burst that starts while driving first has to reverse one side, so it turns
+            # less than one from standstill: do not learn the turn size from it.
+            driving = self.base
             self.base = 0
-            return self._aim()
+            return self._aim(predicted, learn=driving == 0, reverse_from=driving)
 
         closeness = min(1.0, self.size / stop_height)  # 0 = far away, 1 = close enough
         target = s.max_speed - (s.max_speed - s.min_speed) * closeness
@@ -234,31 +314,65 @@ class Steering:
         inner = round(base * (1 - steer))
         return (outer, inner) if ahead > 0 else (inner, outer)
 
-    def _aim(self):
-        """A burst of turning on the spot, sized to bring the person most of the way to the center."""
+    def walking(self):
+        """The person's sideways speed (fraction of the picture per second), ignoring box jitter."""
+        return self.velocity if abs(self.velocity) > self.WALK_THRESHOLD else 0.0
+
+    def predict(self, seconds, walking=None):
+        """Where the person will be `seconds` after their newest picture."""
+        if walking is None:
+            walking = self.walking()
+        if walking == 0 or self._raw is None:
+            return self.offset
+        # The smoothed position lags a walking person; start from the newest one.
+        return self._raw[0] + walking * seconds
+
+    def exit_side(self):
+        """The side (+1 right, -1 left) a person is leaving the picture on, or 0."""
+        if abs(self.offset) > self.settings.search_edge:
+            return 1 if self.offset > 0 else -1
+        ahead = self.offset + self.walking()  # where they will be in a second
+        return (1 if ahead > 0 else -1) if abs(ahead) > 0.5 else 0
+
+    def _aim(self, target, learn=True, reverse_from=0):
+        """A burst of turning on the spot, sized to bring target most of the way to the centre."""
         s = self.settings
-        strength = min(1.0, max(0.0, abs(self.offset) - s.center_enter) / (0.5 - s.center_enter))
+        strength = min(1.0, max(0.0, abs(target) - s.center_enter) / (0.5 - s.center_enter))
         speed = round(s.turn_min_speed + (s.turn_max_speed - s.turn_min_speed) * strength)
-        direction = 1 if self.offset > 0 else -1
+        direction = 1 if target > 0 else -1
         # Aim for 80% of the way: a little short is one more small burst, too far loses them.
-        self.pulse_ms = self._burst_ms(0.8 * abs(self.offset))
-        self._aimed = (self.offset, direction, self.pulse_ms)
+        self.pulse_ms = self._burst_ms(min(self.MAX_AIM_TURN, 0.8 * abs(target)))
+        if reverse_from:
+            # One side first has to ramp down from its driving speed before it turns backwards.
+            s_max = s.pulse_max_ms + s.ramp_ms
+            self.pulse_ms = min(s_max, round(self.pulse_ms + reverse_from / 255 * s.ramp_ms))
+        time = self._raw[1] if self._raw is not None else None
+        self._aimed = (self.offset, self.walking(), time, direction, self.pulse_ms, learn)
         return (speed, -speed) if direction > 0 else (-speed, speed)
 
-    def search(self, side):
+    def search(self, side, extra=0.0):
         """A burst of turning towards side (+1 right, -1 left) to find a person who left the picture.
 
-        Turns about half a picture, so each new view overlaps the last one.
+        Turns about half a picture, so each new view overlaps the last one, plus `extra`
+        (fraction of the picture), e.g. to sweep back past where it already looked.
         """
         s = self.settings
         self._aimed = None
-        self.pulse_ms = self._burst_ms(0.5)
+        # Half a picture, plus how far a walking person gets during the burst.
+        self.pulse_ms = self._burst_ms(0.5 + extra + min(0.5, abs(self.walking()) * 2 * s.aim_ahead))
         return (s.turn_max_speed, -s.turn_max_speed) if side > 0 else (-s.turn_max_speed, s.turn_max_speed)
+
+    def _dead_ms(self):
+        return self.DEAD_TIME_SHARE * self.settings.ramp_ms
+
+    def _turning_ms(self, ms):
+        """The part of a burst that actually turns the rover."""
+        return max(30.0, ms - self._dead_ms())
 
     def _burst_ms(self, turn):
         """Burst length expected to turn by `turn` (fraction of the picture width)."""
         s = self.settings
-        return round(min(s.pulse_max_ms, max(s.pulse_min_ms, turn / self.turn_gain)))
+        return round(min(s.pulse_max_ms, max(s.pulse_min_ms, self._dead_ms() + turn / self.turn_gain)))
 
     def _ramp(self, target):
         """Moves the forward speed gradually towards target, never below the speed that moves the rover."""
@@ -295,6 +409,10 @@ class FollowController(threading.Thread):
         self._settled_at = 0.0  # after a turn burst, only frames taken after this are used
         self._last_side = 0  # which edge the person was near when last seen (+1 right, -1 left)
         self._searches = 0  # search bursts since the person was lost
+        self._misses = 0  # steady pictures without the person since the last burst
+        self._seen_after_burst = 0  # steady pictures with the person since the last burst
+        self._frame_time = 0.0  # when the newest picture of the person was taken
+        self._sweep_back = False  # if the first search burst finds nobody, search the other way
 
     def enable(self, target_name):
         # Starting follow mode is an explicit operator decision, so lift the
@@ -323,7 +441,7 @@ class FollowController(threading.Thread):
             self.signature = person.signature
             self._reset_track()
             self._box = person.box
-            self._last_seen = self.clock()
+            self._last_seen = self._frame_time = self.clock()
             self.vision.target_box = person.box
             self.steering.reset()
             self.state = "locked on"
@@ -371,7 +489,7 @@ class FollowController(threading.Thread):
         if result is None or now - result.timestamp > s.vision_timeout:
             self._hold("waiting for camera (vision too slow or stopped)")
             return
-        after_burst = self.steering.pulse_ms is not None  # the smoothed position is from before the turn
+        after_burst = self.steering.pulse_ms is not None  # waiting for steady pictures after a turn
         if after_burst:
             self._moving = False  # the burst has ended on the ESP32
         if result.frame_id != self._last_frame and result.timestamp >= self._settled_at:
@@ -381,18 +499,26 @@ class FollowController(threading.Thread):
             previous = self._box if now - self._last_seen < s.track_memory else None
             target, kind = select_target(result, self.target_name, previous, self.signature, self.picked)
             self._visible = target is not None
+            if target is None and after_burst:
+                self._misses += 1
             if target is not None:
+                self._misses = 0
                 self._learn_appearance(target, result)
                 self._box = target.box
                 self._last_seen = now
+                self._frame_time = result.timestamp
                 self._searches = 0
+                self._sweep_back = False
                 self.vision.target_box = target.box
                 self.steering.observe(target.box, kind, result.width, result.height, result.timestamp,
-                                      fresh=after_burst)
-                after_burst = False
-                edge = self.steering.offset
-                self._last_side = (1 if edge > 0 else -1) if abs(edge) > s.search_edge else 0
-        if now - self._last_seen > s.lost_grace:
+                                      fresh=after_burst and self._seen_after_burst == 0)
+                if after_burst:
+                    # Decide after two steady pictures: the second shows how fast they are walking.
+                    self._seen_after_burst += 1
+                    after_burst = self._seen_after_burst < 2
+                self._last_side = self.steering.exit_side()
+        if now - self._last_seen > s.lost_grace or self._misses >= 2:
+            # Lost; after a turn, two steady pictures without them is enough to know.
             self._lost()
             return
         if after_burst:
@@ -404,7 +530,7 @@ class FollowController(threading.Thread):
             return
         # Detections flicker, so while the person is briefly not detected the rover keeps
         # driving on its last steering (and the yellow box stays) instead of stopping.
-        command = self.steering.command()
+        command = self.steering.command(now - self._frame_time)
         detail = self._describe()
         if command is None:
             self._hold(f"reached target · {detail}")
@@ -429,15 +555,24 @@ class FollowController(threading.Thread):
     def _lost(self):
         """The person has been gone longer than a detection blip."""
         self.vision.target_box = None
-        overshot = self.steering.learn_lost()
-        if overshot:
-            # The last aiming burst turned right past them: look back the other way.
-            self._last_side = overshot
+        guess, sure = self.steering.learn_lost()
+        if guess:
+            # Lost during an aiming burst: it turned past them, or they outpaced it.
+            self._last_side = guess
             self._searches = 0
+            self._sweep_back = not sure
+        extra = 0.0
+        if self._sweep_back and self._searches == 1:
+            # The first guess was a guess (the turn size is not learned yet) and they were
+            # not there: sweep back the other way, past where the rover started.
+            self._sweep_back = False
+            self._last_side = -self._last_side
+            self._searches = 0
+            extra = 1.0
         if self._last_side and self._searches < self.settings.search_bursts:
             # They walked out of the side of the picture: turn that way to find them.
             self._searches += 1
-            left, right = self.steering.search(self._last_side)
+            left, right = self.steering.search(self._last_side, extra)
             side = "right" if self._last_side > 0 else "left"
             self._burst(left, right, f"searching {side} ({self._searches}/{self.settings.search_bursts})")
             return
@@ -450,6 +585,8 @@ class FollowController(threading.Thread):
         s = self.settings
         ms = self.steering.pulse_ms
         self.state = state
+        self._misses = 0
+        self._seen_after_burst = 0
         if self._drive(left, right, ms):
             # The motors ramp down after the burst (MOTOR_RAMP_MS on the ESP32), then settle.
             self._settled_at = self.clock() + (ms + s.ramp_ms) / 1000 + s.settle

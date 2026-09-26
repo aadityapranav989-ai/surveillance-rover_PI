@@ -310,10 +310,19 @@ rover moves continuously instead of stop-start:
   person, it looks back the other way.
   A continuous full-power spin is too fast to steer by a late camera: it
   overshoots, swings back, and hunts left and right. It aims when close and
-  the person is more than `FOLLOW_CENTER_ENTER` (15%) off-center, and while
+  the person is more than `FOLLOW_CENTER_ENTER` (10%) off-center, and while
   approaching when they are at the edge of the picture (`FOLLOW_AIM_OFFSET`,
   35%): it faces them first, then drives. If even the shortest burst
   overshoots, lower `FOLLOW_PULSE_MIN_MS`.
+- Keeping a walking person centred: the rover measures how fast the person
+  moves across the picture (the trend over the last 4 pictures, so a box
+  that wobbles a few percent is not mistaken for walking) and turns to where
+  they will be `FOLLOW_AIM_AHEAD` (1 s) later, allowing for how old the
+  picture already is. So it starts turning as soon as they start walking
+  towards the edge, instead of when they are nearly out of view. After each
+  turn it waits for two steady pictures to re-measure their speed. A person
+  walking briskly right past the rover can still get out of view for a
+  second or two; it then turns the way they were going to find them.
 - Person walked out of the side of the picture: turn that way up to
   `FOLLOW_SEARCH_BURSTS` (3) bursts to find them again, then wait.
 - Target not detected for a moment: keep going for up to

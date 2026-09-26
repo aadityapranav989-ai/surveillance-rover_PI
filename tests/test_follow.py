@@ -105,34 +105,34 @@ class SteeringTest(unittest.TestCase):
         self.assertIsNone(steering.pulse_ms)
 
     def test_steers_by_where_the_person_will_be(self):
-        steady = Steering(SETTINGS)
-        steady.observe(body_at(0.7, 0.4), "body", W, H, 0.0)
-        steady.observe(body_at(0.7, 0.4), "body", W, H, 0.25)
-        closing = Steering(SETTINGS)  # the rover is already turning towards them
-        closing.observe(body_at(0.8, 0.4), "body", W, H, 0.0)
-        closing.observe(body_at(0.6, 0.4), "body", W, H, 0.25)
-        self.assertAlmostEqual(closing.offset, steady.offset, places=3, msg="same average position")
-        steady_left, steady_right = steady.command()
-        closing_left, closing_right = closing.command()
-        self.assertLess(closing_left - closing_right, steady_left - steady_right,
-                        "eases off the turn before it overshoots")
-        leaving = Steering(SETTINGS)  # the person is walking off to the right
-        leaving.observe(body_at(0.6, 0.4), "body", W, H, 0.0)
-        leaving.observe(body_at(0.8, 0.4), "body", W, H, 0.25)
-        leaving_left, leaving_right = leaving.command()
-        self.assertGreater(leaving_left - leaving_right, steady_left - steady_right, "turns harder to keep up")
+        def seen(*centres):
+            steering = Steering(SETTINGS)
+            for step, centre in enumerate(centres):
+                steering.observe(body_at(centre, 0.4), "body", W, H, step * 0.2)
+            left, right = steering.command()
+            return left - right
+        steady = seen(0.7, 0.7, 0.7)
+        closing = seen(0.85, 0.75, 0.65)  # the rover is already curving towards them
+        self.assertLess(closing, steady, "eases off the turn before it overshoots")
+        self.assertGreaterEqual(closing, 0, "never turns away from them")
+        leaving = seen(0.55, 0.65, 0.75)  # the person is walking off to the right
+        self.assertGreater(leaving, steady, "turns harder to keep up")
 
     def test_learns_how_far_a_burst_turns(self):
         steering = steering_for(body_at(0.85, 0.85))  # close, 35% right
         steering.command()
         first = steering.pulse_ms
         # The burst only moved the person from 35% to 30% right: bursts turn less than guessed.
+        # (It learns on the second steady picture, once it knows the person is standing still.)
         steering.observe(body_at(0.8, 0.85), "body", W, H, 1.0, fresh=True)
+        steering.observe(body_at(0.8, 0.85), "body", W, H, 1.2)
+        self.assertTrue(steering.learned)
         steering.command()
         self.assertGreater(steering.pulse_ms, first, "the next burst is longer")
         # That one swung them from 30% right to 20% left: too far, so shorter next time.
         longer = steering.pulse_ms
         steering.observe(body_at(0.3, 0.85), "body", W, H, 2.0, fresh=True)
+        steering.observe(body_at(0.3, 0.85), "body", W, H, 2.2)
         self.assertEqual(steering.command(), (-255, 255), "turns back towards them")
         self.assertLess(steering.pulse_ms, longer)
 
@@ -142,6 +142,38 @@ class SteeringTest(unittest.TestCase):
         gain = steering.turn_gain
         steering.reset()
         self.assertEqual(steering.turn_gain, gain, "how the rover turns does not change when the person is lost")
+
+    def test_turns_early_for_a_person_walking_out_of_the_picture(self):
+        standing = Steering(SETTINGS)
+        walking = Steering(SETTINGS)
+        for step in range(4):  # close, only 6% right, but walking right at 0.3 pictures per second
+            standing.observe(body_at(0.56, 0.85), "body", W, H, step * 0.2)
+            walking.observe(body_at(0.56 - 0.06 * (3 - step), 0.85), "body", W, H, step * 0.2)
+        self.assertIsNone(standing.command(), "standing near the centre: stay still")
+        self.assertEqual(walking.command(), (255, -255), "walking away from the centre: turn with them")
+        self.assertEqual(walking.exit_side(), 0, "not leaving the picture yet")
+
+    def test_box_wobble_is_not_walking(self):
+        steering = Steering(SETTINGS)
+        for step, centre in enumerate((0.52, 0.49, 0.53, 0.5, 0.52, 0.48)):  # a standing person's box
+            steering.observe(body_at(centre, 0.85), "body", W, H, step * 0.17)
+        self.assertEqual(steering.walking(), 0.0)
+        self.assertIsNone(steering.command())
+
+    def test_walking_speed_is_kept_after_a_turn(self):
+        steering = Steering(SETTINGS)
+        for step in range(4):
+            steering.observe(body_at(0.5 + 0.06 * step, 0.85), "body", W, H, step * 0.2)
+        speed = steering.velocity
+        self.assertAlmostEqual(speed, 0.3, places=1)
+        steering.observe(body_at(0.5, 0.85), "body", W, H, 2.0, fresh=True)  # after a burst
+        self.assertEqual(steering.velocity, speed, "they are still walking")
+        self.assertAlmostEqual(steering.offset, 0.0, places=2)
+
+    def test_long_bursts_turn_more_than_short_ones(self):
+        steering = Steering(SETTINGS)
+        small, large = steering._burst_ms(0.1), steering._burst_ms(0.2)
+        self.assertLess(large - small, small, "the motors' ramp-up does not turn the rover")
 
     def test_fresh_observation_forgets_the_old_position(self):
         steering = steering_for(body_at(0.9, 0.4))
@@ -225,6 +257,8 @@ class FollowControllerTest(unittest.TestCase):
         self.tick([Detection(body_at(0.85, 0.85), 0.9)], advance=settled - self.now + 0.05, age=0.3)
         self.assertEqual(len(self.commands), 1, "no second burst from a stale frame")
         self.tick([Detection(body_at(0.52, 0.85), 0.9)])  # steady picture: now facing the person
+        self.assertIn("looking", self.follow.state, "a second picture shows whether they are walking")
+        self.tick([Detection(body_at(0.52, 0.85), 0.9)])
         self.assertEqual(len(self.commands), 1)
         self.assertIn("reached target", self.follow.state)
         self.assertNotIn("EASE", self.sent, "the burst already ended; nothing to stop")
@@ -272,10 +306,23 @@ class FollowControllerTest(unittest.TestCase):
     def test_looks_back_after_turning_past_the_person(self):
         self.tick([Detection(body_at(0.85, 0.85), 0.9)])  # close, 35% right: aim right
         self.assertEqual(self.commands[-1][:2], (255, -255))
+        self.follow.steering.learned = True  # the rover already knows how far a burst turns
         for _ in range(12):  # the burst swung them out of the picture on the left
             self.tick([])
-        self.assertEqual(self.commands[-1][:2], (-255, 255), "searches left, back the way it came")
-        self.assertIn("searching left", self.follow.state)
+        searches = [command[:2] for command in self.commands[1:]]
+        self.assertTrue(searches)
+        self.assertEqual(set(searches), {(-255, 255)}, "searches left, back the way it came")
+
+    def test_unsure_search_sweeps_back_the_other_way(self):
+        self.tick([Detection(body_at(0.85, 0.85), 0.9)])  # aim right; turn size not learned yet
+        searches = []
+        for _ in range(20):
+            self.tick([])
+            if "searching" in self.follow.state and self.follow.state not in searches:
+                searches.append(self.follow.state)
+        self.assertEqual(searches[:2], ["searching left (1/3)", "searching right (1/3)"],
+                         "first guess, then back past where it started")
+        self.assertGreater(self.commands[2][2], self.commands[1][2], "the sweep back turns further")
 
     def test_status_shows_the_numbers(self):
         self.tick([Detection(body_at(0.7, 0.4), 0.9)])
